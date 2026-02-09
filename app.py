@@ -129,10 +129,15 @@ st.markdown("""
 
     /* Publish — invisible checkbox overlaid on avatar */
     .stCheckbox {
-        margin-top: -52px !important;
+        margin-top: -48px !important;
         margin-bottom: 0 !important;
         height: 48px !important;
-        overflow: hidden !important;
+        display: flex !important;
+        justify-content: center !important;
+    }
+    .stCheckbox > div {
+        width: 48px !important;
+        height: 48px !important;
     }
     .stCheckbox label {
         width: 48px !important;
@@ -142,7 +147,6 @@ st.markdown("""
         cursor: pointer !important;
         opacity: 0 !important;
         display: block !important;
-        margin: 0 auto !important;
     }
     .stCheckbox label span[data-testid="stCheckboxLabel"] {
         display: none !important;
