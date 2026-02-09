@@ -12,7 +12,7 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
-st.set_page_config(page_title="TikFusion", page_icon="🎬", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="TikFusion x LTP", page_icon="assets/favicon.svg", layout="wide", initial_sidebar_state="collapsed")
 
 # ============ APPLE-INSPIRED CSS ============
 st.markdown("""
