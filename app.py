@@ -152,7 +152,19 @@ def main():
             if 'single_analyses' in st.session_state:
                 analyses = st.session_state['single_analyses']
                 st.markdown(f"**📁 outputs/{st.session_state.get('single_folder', '')}/")
-                
+
+                st.markdown("""<div style="background:#1a1a2e;padding:8px 12px;border-radius:6px;margin-bottom:10px;font-size:0.85em">
+                ✅ = Postable sur la plateforme (assez unique pour ne pas être flag comme doublon)<br>
+                ❌ = Risque de détection (trop similaire à l'original)
+                </div>""", unsafe_allow_html=True)
+
+                cols = st.columns([2, 1, 1, 1, 1])
+                cols[0].markdown("**Fichier**")
+                cols[1].markdown("**Unicité**")
+                cols[2].markdown("**TikTok**")
+                cols[3].markdown("**Insta**")
+                cols[4].markdown("**YouTube**")
+
                 for a in analyses:
                     cols = st.columns([2, 1, 1, 1, 1])
                     cols[0].text(a['name'])
@@ -307,12 +319,16 @@ def main():
                 for r in results:
                     with st.expander(f"📹 {r['name']} ({r['success_count']} variations)"):
                         if r['variations']:
-                            cols = st.columns([2, 2, 1, 1, 1])
+                            st.markdown("""<div style="background:#1a1a2e;padding:6px 10px;border-radius:5px;margin-bottom:8px;font-size:0.8em">
+                            ✅ = Postable &nbsp;|&nbsp; ❌ = Risque de détection
+                            </div>""", unsafe_allow_html=True)
+
+                            cols = st.columns([2, 1, 1, 1, 1])
                             cols[0].markdown("**Var**")
                             cols[1].markdown("**Unicité**")
-                            cols[2].markdown("**TT**")
-                            cols[3].markdown("**IG**")
-                            cols[4].markdown("**YT**")
+                            cols[2].markdown("**TikTok**")
+                            cols[3].markdown("**Insta**")
+                            cols[4].markdown("**YouTube**")
                             
                             for v in r['variations']:
                                 cols = st.columns([2, 1, 1, 1, 1])

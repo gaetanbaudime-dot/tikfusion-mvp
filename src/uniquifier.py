@@ -5,8 +5,9 @@ import subprocess
 import os
 import random
 import string
+import uuid
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 import locale
 
 # Set French locale for date formatting
@@ -53,9 +54,24 @@ def uniquify_video_ffmpeg(input_path, output_path, intensity="medium"):
 
     crf = random.randint(18, 23)
 
-    # Randomiser les métadonnées pour renforcer l'unicité
-    random_title = ''.join(random.choices(string.ascii_letters + string.digits, k=12))
-    random_comment = ''.join(random.choices(string.ascii_letters + string.digits, k=16))
+    # Randomiser les métadonnées pour renforcer l'unicité (max différence entre variations)
+    encoders = ["Lavf58.76.100", "Lavf59.27.100", "Lavf60.3.100", "HandBrake 1.6.1",
+                "Adobe Premiere Pro", "DaVinci Resolve 18", "CapCut 3.2", "FFmpeg 6.0",
+                "iMovie 10.3", "Final Cut Pro X", "Filmora 13", "VLC media player"]
+    handler_names = ["VideoHandler", "MainHandler", "ISO Media", "Apple Video Media Handler",
+                     "Core Media Video", "GPAC ISO Video Handler", "Mainconcept Video Media Handler"]
+
+    random_title = ''.join(random.choices(string.ascii_letters + string.digits + ' _-', k=random.randint(8, 32)))
+    random_comment = ''.join(random.choices(string.ascii_letters + string.digits + ' .,!', k=random.randint(10, 48)))
+    random_encoder = random.choice(encoders)
+    random_handler = random.choice(handler_names)
+
+    # Date de création aléatoire (entre -30 jours et maintenant)
+    random_days = random.uniform(0, 30)
+    random_creation = (datetime.now() - timedelta(days=random_days)).isoformat() + "Z"
+
+    # UUID unique pour chaque fichier
+    random_uuid = str(uuid.uuid4())
 
     # Tracer toutes les modifications appliquées
     modifications = {
@@ -76,12 +92,16 @@ def uniquify_video_ffmpeg(input_path, output_path, intensity="medium"):
 
     cmd.extend(["-c:v", "libx264", "-crf", str(crf), "-preset", "fast", "-c:a", "aac", "-b:a", "128k"])
 
-    # Métadonnées aléatoires
+    # Métadonnées aléatoires (max variées entre chaque variation)
     cmd.extend([
         "-metadata", f"title={random_title}",
         "-metadata", f"comment={random_comment}",
-        "-metadata", "encoder=libx264",
-        "-metadata", f"creation_time={datetime.now().isoformat()}",
+        "-metadata", f"encoder={random_encoder}",
+        "-metadata", f"handler_name={random_handler}",
+        "-metadata", f"creation_time={random_creation}",
+        "-metadata", f"file_id={random_uuid}",
+        "-metadata", f"major_brand=mp42",
+        "-metadata", f"minor_version={random.randint(0, 512)}",
     ])
 
     cmd.append(output_path)
