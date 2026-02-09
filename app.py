@@ -1,24 +1,190 @@
 """
-TikFusion MVP - Interface compacte
+TikFusion x LTP - Apple-inspired design
 """
 import streamlit as st
 import os
 import sys
 import json
 import tempfile
+import base64
 from pathlib import Path
 from datetime import datetime
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
-st.set_page_config(page_title="TikFusion MVP", page_icon="🎬", layout="wide")
+st.set_page_config(page_title="TikFusion x LTP", page_icon="🎬", layout="wide", initial_sidebar_state="collapsed")
 
+# ============ APPLE-INSPIRED CSS ============
 st.markdown("""
 <style>
-    .main-header { font-size: 2.5rem; font-weight: bold; background: linear-gradient(90deg, #ff0050, #00f2ea); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-    .folder-name { background: #333; color: #00f2ea; padding: 10px; border-radius: 5px; font-family: monospace; }
+    /* Hide default sidebar */
+    [data-testid="stSidebar"] { display: none; }
+
+    /* SF Pro inspired typography */
+    * { font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif; }
+
+    /* Header bar */
+    .header-bar {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+        padding: 20px 0 10px 0;
+        border-bottom: 1px solid #2C2C2E;
+        margin-bottom: 24px;
+    }
+    .header-logo {
+        background: #F5F5F7;
+        color: #000;
+        font-weight: 800;
+        font-size: 1.3rem;
+        padding: 6px 14px;
+        border-radius: 8px;
+        letter-spacing: 2px;
+    }
+    .header-title {
+        font-size: 2rem;
+        font-weight: 700;
+        color: #F5F5F7;
+        letter-spacing: -0.5px;
+    }
+    .header-x {
+        font-size: 1.4rem;
+        color: #86868B;
+        font-weight: 300;
+    }
+
+    /* Apple card style */
+    .apple-card {
+        background: #1C1C1E;
+        border-radius: 16px;
+        padding: 20px;
+        margin: 8px 0;
+        border: 1px solid #2C2C2E;
+    }
+
+    /* Variation row */
+    .var-row {
+        background: #1C1C1E;
+        border-radius: 12px;
+        padding: 12px 16px;
+        margin: 6px 0;
+        border: 1px solid #2C2C2E;
+        transition: background 0.2s;
+    }
+    .var-row:hover {
+        background: #2C2C2E;
+    }
+
+    /* Tags */
+    .tag {
+        display: inline-block;
+        padding: 3px 8px;
+        border-radius: 6px;
+        font-size: 0.75rem;
+        font-weight: 500;
+        margin: 1px 2px;
+    }
+    .tag-mirror { background: #FF453A; color: white; }
+    .tag-speed { background: #2C2C2E; color: #64D2FF; border: 1px solid #3A3A3C; }
+    .tag-hue { background: #2C2C2E; color: #FF9F0A; border: 1px solid #3A3A3C; }
+    .tag-crop { background: #2C2C2E; color: #30D158; border: 1px solid #3A3A3C; }
+    .tag-meta { background: #2C2C2E; color: #BF5AF2; border: 1px solid #3A3A3C; }
+
+    /* Uniqueness badges */
+    .badge-safe {
+        background: #30D158;
+        color: white;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-weight: 600;
+        font-size: 0.85rem;
+    }
+    .badge-danger {
+        background: #FF453A;
+        color: white;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-weight: 600;
+        font-size: 0.85rem;
+    }
+
+    /* Legend */
+    .legend {
+        background: #1C1C1E;
+        border: 1px solid #2C2C2E;
+        border-radius: 10px;
+        padding: 8px 16px;
+        font-size: 0.8rem;
+        color: #86868B;
+        margin-bottom: 16px;
+    }
+
+    /* Folder badge */
+    .folder-badge {
+        background: #1C1C1E;
+        color: #64D2FF;
+        padding: 8px 16px;
+        border-radius: 10px;
+        font-family: 'SF Mono', 'Menlo', monospace;
+        font-size: 0.85rem;
+        border: 1px solid #2C2C2E;
+        display: inline-block;
+        margin-bottom: 12px;
+    }
+
+    /* Metric cards */
+    [data-testid="stMetric"] {
+        background: #1C1C1E;
+        border: 1px solid #2C2C2E;
+        border-radius: 12px;
+        padding: 16px;
+    }
+
+    /* Streamlit overrides for cleaner look */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 0px;
+        background: #1C1C1E;
+        border-radius: 12px;
+        padding: 4px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        border-radius: 8px;
+        padding: 8px 20px;
+        font-weight: 500;
+    }
+    .stTabs [aria-selected="true"] {
+        background: #007AFF !important;
+    }
+
+    /* Button styling */
+    .stButton > button[kind="primary"] {
+        background: #007AFF;
+        border: none;
+        border-radius: 10px;
+        font-weight: 600;
+        padding: 8px 24px;
+    }
+    .stButton > button[kind="primary"]:hover {
+        background: #0056CC;
+    }
+
+    /* Download button */
+    .stDownloadButton > button {
+        background: #2C2C2E;
+        border: 1px solid #3A3A3C;
+        border-radius: 8px;
+        font-size: 0.85rem;
+    }
+
+    /* Expander */
+    .streamlit-expanderHeader {
+        background: #1C1C1E;
+        border-radius: 12px;
+    }
 </style>
 """, unsafe_allow_html=True)
+
 
 def compare_to_original(original_path, variation_path):
     """Compare une variation à l'original"""
@@ -28,71 +194,91 @@ def compare_to_original(original_path, variation_path):
         result = checker.compare_videos(original_path, variation_path)
         similarity = result['similarity_percent']
         uniqueness = 100 - similarity
-        return {
-            'similarity': similarity,
-            'uniqueness': uniqueness,
-        }
+        return {'similarity': similarity, 'uniqueness': uniqueness}
     except:
         return {'uniqueness': 50}
 
+
 def get_dated_folder_name():
-    """Génère un nom de dossier avec date et heure"""
     now = datetime.now()
     mois_fr = {1: "janvier", 2: "fevrier", 3: "mars", 4: "avril", 5: "mai", 6: "juin",
                7: "juillet", 8: "aout", 9: "septembre", 10: "octobre", 11: "novembre", 12: "decembre"}
     return f"{now.day} {mois_fr[now.month]} {now.strftime('%Hh%M')}"
 
+
 def format_modifications(mods):
-    """Formate les modifications en tags visuels compacts"""
+    """Formate les modifications en tags Apple-style"""
     tags = []
     if mods.get("hflip"):
-        tags.append('<span style="background:#f44336;color:white;padding:2px 6px;border-radius:3px;font-size:0.8em">🪞 Miroir</span>')
+        tags.append('<span class="tag tag-mirror">🪞 Miroir</span>')
     speed = mods.get("speed", 1.0)
     if abs(speed - 1.0) > 0.005:
-        tags.append(f'<span style="background:#333;color:#00f2ea;padding:2px 6px;border-radius:3px;font-size:0.8em">🔄 x{speed:.2f}</span>')
+        tags.append(f'<span class="tag tag-speed">🔄 x{speed:.2f}</span>')
     hue = mods.get("hue_shift", 0)
     if abs(hue) > 0:
-        tags.append(f'<span style="background:#333;color:#ff9800;padding:2px 6px;border-radius:3px;font-size:0.8em">🎨 {hue:+d}°</span>')
+        tags.append(f'<span class="tag tag-hue">🎨 {hue:+d}°</span>')
     crop = mods.get("crop_percent", 0)
     if crop > 0.1:
-        tags.append(f'<span style="background:#333;color:#8bc34a;padding:2px 6px;border-radius:3px;font-size:0.8em">✂️ {crop:.1f}%</span>')
+        tags.append(f'<span class="tag tag-crop">✂️ {crop:.1f}%</span>')
     if mods.get("metadata_randomized"):
-        tags.append('<span style="background:#333;color:#9c27b0;padding:2px 6px;border-radius:3px;font-size:0.8em">🏷️ Metadata</span>')
-    return " ".join(tags) if tags else '<span style="color:#666;font-size:0.8em">-</span>'
+        tags.append('<span class="tag tag-meta">🏷️ Meta</span>')
+    return " ".join(tags) if tags else '<span style="color:#48484A">—</span>'
+
 
 def main():
-    st.markdown('<p class="main-header">🎬 TikFusion MVP</p>', unsafe_allow_html=True)
+    # ============ HEADER WITH LOGO ============
+    st.markdown("""
+    <div class="header-bar">
+        <span class="header-logo">LTP</span>
+        <span class="header-title">TikFusion</span>
+        <span class="header-x">x</span>
+        <span class="header-logo">LTP</span>
+    </div>
+    """, unsafe_allow_html=True)
 
-    with st.sidebar:
-        st.header("⚙️ Configuration")
-        output_dir = st.text_input("📁 Dossier racine", value="outputs")
-        intensity = st.select_slider("🎚️ Intensité", options=["low", "medium", "high"], value="medium")
+    # ============ TABS (config moved to last tab) ============
+    tab1, tab2, tab3, tab4 = st.tabs(["📤 Single", "📦 Bulk", "📊 Stats", "⚙️ Config"])
+
+    # ========== TAB 4: CONFIG (read first for variables) ==========
+    with tab4:
+        st.markdown("### ⚙️ Configuration")
+        c1, c2 = st.columns(2)
+        with c1:
+            output_dir = st.text_input("📁 Dossier de sortie", value="outputs", key="cfg_output")
+        with c2:
+            intensity = st.select_slider("🎚️ Intensité des modifications", options=["low", "medium", "high"], value="medium", key="cfg_intensity")
 
         st.markdown("---")
-        st.markdown("**📁 Dossiers récents:**")
         if os.path.exists(output_dir):
+            st.markdown("**📁 Sessions récentes**")
             folders = sorted([f for f in os.listdir(output_dir) if os.path.isdir(os.path.join(output_dir, f))], reverse=True)
             for folder in folders[:5]:
                 count = len(list(Path(os.path.join(output_dir, folder)).rglob("*.mp4")))
-                st.text(f"📁 {folder} ({count} vidéos)")
+                st.text(f"  📁 {folder} ({count} vidéos)")
 
-    # TABS
-    tab1, tab2, tab3 = st.tabs(["📤 Single Upload", "📦 Bulk Upload", "📊 Stats"])
+    # Ensure config values are available
+    if 'cfg_output' not in st.session_state:
+        output_dir = "outputs"
+    else:
+        output_dir = st.session_state['cfg_output']
+
+    if 'cfg_intensity' not in st.session_state:
+        intensity = "medium"
+    else:
+        intensity = st.session_state['cfg_intensity']
 
     # ========== TAB 1: SINGLE UPLOAD ==========
     with tab1:
-        st.header("📤 Upload unique")
+        col_upload, col_results = st.columns([1, 2])
 
-        col1, col2 = st.columns([1, 2])
-
-        with col1:
-            uploaded = st.file_uploader("📹 Ta vidéo", type=['mp4', 'mov', 'avi'], key="single")
+        with col_upload:
+            uploaded = st.file_uploader("📹 Vidéo source", type=['mp4', 'mov', 'avi'], key="single")
 
             if uploaded:
                 st.video(uploaded)
-                num_vars = st.slider("Variations", 1, 15, 5, key="single_vars")
+                num_vars = st.slider("Nombre de variations", 1, 15, 5, key="single_vars")
 
-                if st.button("🚀 Générer", type="primary", key="single_btn"):
+                if st.button("Générer les variations", type="primary", key="single_btn"):
                     with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp:
                         tmp.write(uploaded.read())
                         original_path = tmp.name
@@ -103,12 +289,12 @@ def main():
                     try:
                         from uniquifier import batch_uniquify
 
-                        status.text("⏳ Génération...")
+                        status.text("⏳ Génération en cours...")
                         results = batch_uniquify(original_path, output_dir, num_vars, intensity)
 
                         folder_name = os.path.basename(os.path.dirname(results[0]["output_path"])) if results else ""
 
-                        status.text("🔍 Analyse...")
+                        status.text("🔍 Analyse de l'unicité...")
                         analyses = []
                         for i, r in enumerate(results):
                             if r["success"]:
@@ -122,53 +308,41 @@ def main():
                         st.session_state['single_analyses'] = analyses
                         st.session_state['single_folder'] = folder_name
                         status.empty()
-                        st.success(f"✅ {len(analyses)} variations générées!")
+                        progress.empty()
+                        st.success(f"✅ {len(analyses)} variations générées")
 
                         os.unlink(original_path)
                     except Exception as e:
                         st.error(f"Erreur: {e}")
 
-        with col2:
+        with col_results:
             if 'single_analyses' in st.session_state:
                 analyses = st.session_state['single_analyses']
-                st.markdown(f"**📁 outputs/{st.session_state.get('single_folder', '')}/")
 
-                st.markdown("""<div style="background:#1a1a2e;padding:8px 12px;border-radius:6px;margin-bottom:12px;font-size:0.85em">
-                🟢 ≥ 80% = Suffisamment unique &nbsp;|&nbsp; 🔴 < 80% = Trop similaire à l'original
+                st.markdown(f"<div class='folder-badge'>📁 outputs/{st.session_state.get('single_folder', '')}/</div>", unsafe_allow_html=True)
+
+                st.markdown("""<div class="legend">
+                🟢 <b>≥ 80%</b> = Suffisamment unique &nbsp;&nbsp;|&nbsp;&nbsp; 🔴 <b>< 80%</b> = Trop similaire à l'original
                 </div>""", unsafe_allow_html=True)
 
                 for a in analyses:
                     cols = st.columns([1, 3, 1, 2, 1])
-                    # Nom
                     cols[0].markdown(f"**{a['name']}**")
-                    # Tags modifications
                     cols[1].markdown(format_modifications(a.get('modifications', {})), unsafe_allow_html=True)
-                    # Unicité vert/rouge
                     u = a['uniqueness']
-                    color = '#00c853' if u >= 80 else '#f44336'
-                    cols[2].markdown(f"<span style='background:{color};color:white;padding:4px 8px;border-radius:5px;font-weight:bold'>{u:.0f}%</span>", unsafe_allow_html=True)
-                    # Preview vidéo
+                    badge = 'badge-safe' if u >= 80 else 'badge-danger'
+                    cols[2].markdown(f"<span class='{badge}'>{u:.0f}%</span>", unsafe_allow_html=True)
                     output_path = a.get('output_path', '')
                     if output_path and os.path.exists(output_path):
                         cols[3].video(output_path)
-                        # Download
                         with open(output_path, "rb") as f:
-                            cols[4].download_button(
-                                "⬇️",
-                                f.read(),
-                                file_name=Path(output_path).name,
-                                mime="video/mp4",
-                                key=f"dl_{a['name']}"
-                            )
+                            cols[4].download_button("⬇️", f.read(), file_name=Path(output_path).name, mime="video/mp4", key=f"dl_{a['name']}")
 
     # ========== TAB 2: BULK UPLOAD ==========
     with tab2:
-        st.header("📦 Bulk Upload - Traitement en masse")
-        st.markdown("Upload jusqu'à **10 vidéos** et génère des variations pour chacune.")
+        col_upload, col_results = st.columns([1, 1])
 
-        col1, col2 = st.columns([1, 1])
-
-        with col1:
+        with col_upload:
             uploaded_files = st.file_uploader(
                 "📹 Sélectionne plusieurs vidéos",
                 type=['mp4', 'mov', 'avi'],
@@ -178,7 +352,7 @@ def main():
 
             if uploaded_files:
                 if len(uploaded_files) > 10:
-                    st.warning(f"⚠️ Maximum 10 vidéos. Seules les 10 premières seront traitées.")
+                    st.warning("⚠️ Maximum 10 vidéos. Seules les 10 premières seront traitées.")
                     uploaded_files = uploaded_files[:10]
                 st.success(f"📁 {len(uploaded_files)} vidéos sélectionnées")
 
@@ -190,18 +364,15 @@ def main():
                 vars_per_video = st.slider("Variations par vidéo", 1, 10, 3, key="bulk_vars")
 
                 total = len(uploaded_files) * vars_per_video
-                st.warning(f"⚠️ Total: **{total} vidéos** seront générées")
+                st.warning(f"⚠️ Total : **{total} vidéos** seront générées")
 
-                if st.button("🚀 Lancer le Bulk Processing", type="primary", key="bulk_btn"):
-
-                    # Create main folder for this bulk session
+                if st.button("Lancer le traitement", type="primary", key="bulk_btn"):
                     bulk_folder = get_dated_folder_name() + " - BULK"
                     bulk_path = os.path.join(output_dir, bulk_folder)
                     os.makedirs(bulk_path, exist_ok=True)
 
                     overall_progress = st.progress(0)
                     status = st.empty()
-
                     all_results = []
 
                     try:
@@ -209,24 +380,17 @@ def main():
 
                         for vid_idx, uploaded_file in enumerate(uploaded_files):
                             video_name = Path(uploaded_file.name).stem
-                            status.text(f"⏳ [{vid_idx + 1}/{len(uploaded_files)}] Traitement: {video_name}")
+                            status.text(f"⏳ [{vid_idx + 1}/{len(uploaded_files)}] {video_name}")
 
-                            # Save original temporarily
                             with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp:
                                 tmp.write(uploaded_file.read())
                                 original_path = tmp.name
 
-                            # Create subfolder for this video
                             video_folder = os.path.join(bulk_path, video_name)
                             os.makedirs(video_folder, exist_ok=True)
 
-                            video_results = {
-                                'name': video_name,
-                                'variations': [],
-                                'success_count': 0
-                            }
+                            video_results = {'name': video_name, 'variations': [], 'success_count': 0}
 
-                            # Generate variations
                             for var_idx in range(vars_per_video):
                                 output_path = os.path.join(video_folder, f"V{var_idx + 1:02d}.mp4")
                                 result = uniquify_video_ffmpeg(original_path, output_path, intensity)
@@ -243,7 +407,6 @@ def main():
 
                             all_results.append(video_results)
                             os.unlink(original_path)
-
                             overall_progress.progress((vid_idx + 1) / len(uploaded_files))
 
                         st.session_state['bulk_results'] = all_results
@@ -252,23 +415,19 @@ def main():
 
                         status.empty()
                         total_success = sum(r['success_count'] for r in all_results)
-                        st.success(f"✅ Terminé! {total_success} vidéos générées!")
+                        st.success(f"✅ {total_success} vidéos générées")
 
                     except Exception as e:
                         st.error(f"Erreur: {e}")
 
-        with col2:
-            st.subheader("📊 Résultats Bulk")
-
+        with col_results:
             if 'bulk_results' in st.session_state:
                 results = st.session_state['bulk_results']
                 bulk_folder = st.session_state.get('bulk_folder', '')
                 bulk_path = st.session_state.get('bulk_path', '')
 
-                st.markdown(f"<div class='folder-name'>📁 outputs/{bulk_folder}/</div>", unsafe_allow_html=True)
-                st.markdown("")
+                st.markdown(f"<div class='folder-badge'>📁 outputs/{bulk_folder}/</div>", unsafe_allow_html=True)
 
-                # Summary stats
                 total_videos = sum(r['success_count'] for r in results)
                 all_variations = [v for r in results for v in r['variations']]
                 avg_uniqueness = sum(v['uniqueness'] for v in all_variations) / len(all_variations) if all_variations else 0
@@ -279,60 +438,31 @@ def main():
                 col_b.metric("📊 Unicité moy.", f"{avg_uniqueness:.0f}%")
                 col_c.metric("✅ Safe (≥80%)", f"{safe_count}/{len(all_variations)}")
 
-                st.markdown("""<div style="background:#1a1a2e;padding:6px 10px;border-radius:5px;margin:8px 0;font-size:0.8em">
-                🟢 ≥ 80% = Suffisamment unique &nbsp;|&nbsp; 🔴 < 80% = Trop similaire
+                st.markdown("""<div class="legend">
+                🟢 <b>≥ 80%</b> = Suffisamment unique &nbsp;&nbsp;|&nbsp;&nbsp; 🔴 <b>< 80%</b> = Trop similaire
                 </div>""", unsafe_allow_html=True)
 
-                # Per-video results
                 for r in results:
-                    with st.expander(f"📹 {r['name']} ({r['success_count']} variations)"):
+                    with st.expander(f"📹 {r['name']} — {r['success_count']} variations"):
                         if r['variations']:
                             for v in r['variations']:
                                 cols = st.columns([1, 3, 1, 2, 1])
-                                # Nom
                                 cols[0].markdown(f"**{v['name']}**")
-                                # Tags modifications
                                 cols[1].markdown(format_modifications(v.get('modifications', {})), unsafe_allow_html=True)
-                                # Unicité vert/rouge
                                 u = v['uniqueness']
-                                color = '#00c853' if u >= 80 else '#f44336'
-                                cols[2].markdown(f"<span style='background:{color};color:white;padding:4px 8px;border-radius:5px;font-weight:bold'>{u:.0f}%</span>", unsafe_allow_html=True)
-                                # Preview vidéo
+                                badge = 'badge-safe' if u >= 80 else 'badge-danger'
+                                cols[2].markdown(f"<span class='{badge}'>{u:.0f}%</span>", unsafe_allow_html=True)
                                 vpath = v.get('output_path', '')
                                 if vpath and os.path.exists(vpath):
                                     cols[3].video(vpath)
-                                    # Download
                                     with open(vpath, "rb") as f:
-                                        cols[4].download_button(
-                                            "⬇️",
-                                            f.read(),
-                                            file_name=f"{r['name']}_{v['name']}.mp4",
-                                            mime="video/mp4",
-                                            key=f"dl_bulk_{r['name']}_{v['name']}"
-                                        )
+                                        cols[4].download_button("⬇️", f.read(), file_name=f"{r['name']}_{v['name']}.mp4", mime="video/mp4", key=f"dl_bulk_{r['name']}_{v['name']}")
             else:
-                st.info("👈 Upload plusieurs vidéos et lance le bulk processing")
-
-                st.markdown("""
-                ### 📁 Structure des fichiers
-```
-                outputs/
-                └── 29 janvier 14h34 - BULK/
-                    ├── video1/
-                    │   ├── V01.mp4
-                    │   ├── V02.mp4
-                    │   └── V05.mp4
-                    ├── video2/
-                    │   ├── V01.mp4
-                    │   └── ...
-                    └── video3/
-                        └── ...
-```
-                """)
+                st.info("👈 Upload plusieurs vidéos et lance le traitement")
 
     # ========== TAB 3: STATS ==========
     with tab3:
-        st.header("📊 Statistiques globales")
+        st.markdown("### 📊 Statistiques globales")
 
         if os.path.exists(output_dir):
             all_videos = list(Path(output_dir).rglob("*.mp4"))
@@ -345,12 +475,13 @@ def main():
             col3.metric("💾 Espace", f"{total_size:.1f} MB")
 
             st.markdown("---")
-            st.markdown("### 📁 Toutes les sessions")
+            st.markdown("**📁 Toutes les sessions**")
 
             for folder in sorted(all_folders, reverse=True):
                 folder_path = os.path.join(output_dir, folder)
                 videos = list(Path(folder_path).rglob("*.mp4"))
-                st.text(f"📁 {folder} - {len(videos)} vidéos")
+                st.text(f"  📁 {folder} — {len(videos)} vidéos")
+
 
 if __name__ == "__main__":
     main()
