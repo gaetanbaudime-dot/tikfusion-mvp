@@ -128,20 +128,30 @@ st.markdown("""
     .tag-meta { background: #2C2C2E; color: #BF5AF2; border: 1px solid #3A3A3C; }
 
     /* Publish — invisible checkbox overlaid on avatar */
-    .stCheckbox {
+    .stElementContainer:has(.stCheckbox) {
+        width: 100% !important;
+        max-width: 100% !important;
         margin-top: -48px !important;
         margin-bottom: 0 !important;
         height: 48px !important;
     }
-    .stCheckbox,
-    .stCheckbox > div,
+    .stCheckbox {
+        width: 100% !important;
+        height: 48px !important;
+        opacity: 0 !important;
+        cursor: pointer !important;
+    }
+    .stCheckbox > div {
+        width: 100% !important;
+        height: 48px !important;
+    }
     .stCheckbox label {
         width: 100% !important;
         height: 48px !important;
         min-height: 0 !important;
         padding: 0 !important;
         cursor: pointer !important;
-        opacity: 0 !important;
+        display: block !important;
     }
     .stCheckbox label span[data-testid="stCheckboxLabel"] {
         display: none !important;
