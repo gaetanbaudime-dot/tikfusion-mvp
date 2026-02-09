@@ -1,0 +1,7 @@
+venv/
+outputs/
+video_library/hashes.json
+.DS_Store
+__pycache__/
+*.pyc
+.env
