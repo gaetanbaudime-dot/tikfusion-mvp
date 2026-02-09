@@ -1,5 +1,5 @@
 """
-TikFusion MVP - With Bulk Upload feature
+TikFusion MVP - Interface compacte
 """
 import streamlit as st
 import os
@@ -16,11 +16,7 @@ st.set_page_config(page_title="TikFusion MVP", page_icon="🎬", layout="wide")
 st.markdown("""
 <style>
     .main-header { font-size: 2.5rem; font-weight: bold; background: linear-gradient(90deg, #ff0050, #00f2ea); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-    .safe { background: #00c853; color: white; padding: 5px 10px; border-radius: 5px; }
-    .warning { background: #ffc107; color: black; padding: 5px 10px; border-radius: 5px; }
-    .danger { background: #f44336; color: white; padding: 5px 10px; border-radius: 5px; }
     .folder-name { background: #333; color: #00f2ea; padding: 10px; border-radius: 5px; font-family: monospace; }
-    .video-card { background: #1a1a1a; padding: 10px; border-radius: 8px; margin: 5px 0; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -35,12 +31,9 @@ def compare_to_original(original_path, variation_path):
         return {
             'similarity': similarity,
             'uniqueness': uniqueness,
-            'safe_tiktok': uniqueness >= 30,
-            'safe_instagram': uniqueness >= 20,
-            'safe_youtube': uniqueness >= 25
         }
     except:
-        return {'uniqueness': 50, 'safe_tiktok': True, 'safe_instagram': True, 'safe_youtube': True}
+        return {'uniqueness': 50}
 
 def get_dated_folder_name():
     """Génère un nom de dossier avec date et heure"""
@@ -65,7 +58,7 @@ def format_modifications(mods):
         tags.append(f'<span style="background:#333;color:#8bc34a;padding:2px 6px;border-radius:3px;font-size:0.8em">✂️ {crop:.1f}%</span>')
     if mods.get("metadata_randomized"):
         tags.append('<span style="background:#333;color:#9c27b0;padding:2px 6px;border-radius:3px;font-size:0.8em">🏷️ Metadata</span>')
-    return " ".join(tags) if tags else '<span style="color:#666;font-size:0.8em">Aucune modification majeure</span>'
+    return " ".join(tags) if tags else '<span style="color:#666;font-size:0.8em">-</span>'
 
 def main():
     st.markdown('<p class="main-header">🎬 TikFusion MVP</p>', unsafe_allow_html=True)
@@ -74,7 +67,7 @@ def main():
         st.header("⚙️ Configuration")
         output_dir = st.text_input("📁 Dossier racine", value="outputs")
         intensity = st.select_slider("🎚️ Intensité", options=["low", "medium", "high"], value="medium")
-        
+
         st.markdown("---")
         st.markdown("**📁 Dossiers récents:**")
         if os.path.exists(output_dir):
@@ -89,32 +82,32 @@ def main():
     # ========== TAB 1: SINGLE UPLOAD ==========
     with tab1:
         st.header("📤 Upload unique")
-        
+
         col1, col2 = st.columns([1, 2])
-        
+
         with col1:
             uploaded = st.file_uploader("📹 Ta vidéo", type=['mp4', 'mov', 'avi'], key="single")
-            
+
             if uploaded:
                 st.video(uploaded)
                 num_vars = st.slider("Variations", 1, 15, 5, key="single_vars")
-                
+
                 if st.button("🚀 Générer", type="primary", key="single_btn"):
                     with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp:
                         tmp.write(uploaded.read())
                         original_path = tmp.name
-                    
+
                     progress = st.progress(0)
                     status = st.empty()
-                    
+
                     try:
                         from uniquifier import batch_uniquify
-                        
+
                         status.text("⏳ Génération...")
                         results = batch_uniquify(original_path, output_dir, num_vars, intensity)
-                        
+
                         folder_name = os.path.basename(os.path.dirname(results[0]["output_path"])) if results else ""
-                        
+
                         status.text("🔍 Analyse...")
                         analyses = []
                         for i, r in enumerate(results):
@@ -122,68 +115,59 @@ def main():
                                 analysis = compare_to_original(original_path, r["output_path"])
                                 analysis['name'] = Path(r["output_path"]).stem
                                 analysis['modifications'] = r.get("modifications", {})
+                                analysis['output_path'] = r["output_path"]
                                 analyses.append(analysis)
                             progress.progress((i + 1) / len(results))
-                        
+
                         st.session_state['single_analyses'] = analyses
                         st.session_state['single_folder'] = folder_name
-                        st.session_state['single_results'] = results
                         status.empty()
                         st.success(f"✅ {len(analyses)} variations générées!")
-
-                        # Download buttons
-                        st.markdown("**Télécharger les variations :**")
-                        for r in results:
-                            if r["success"] and os.path.exists(r["output_path"]):
-                                with open(r["output_path"], "rb") as f:
-                                    st.download_button(
-                                        f"⬇️ {Path(r['output_path']).name}",
-                                        f.read(),
-                                        file_name=Path(r["output_path"]).name,
-                                        mime="video/mp4",
-                                        key=f"dl_single_{Path(r['output_path']).stem}"
-                                    )
 
                         os.unlink(original_path)
                     except Exception as e:
                         st.error(f"Erreur: {e}")
-        
+
         with col2:
             if 'single_analyses' in st.session_state:
                 analyses = st.session_state['single_analyses']
                 st.markdown(f"**📁 outputs/{st.session_state.get('single_folder', '')}/")
 
-                st.markdown("""<div style="background:#1a1a2e;padding:8px 12px;border-radius:6px;margin-bottom:10px;font-size:0.85em">
-                ✅ = Postable sur la plateforme (assez unique pour ne pas être flag comme doublon)<br>
-                ❌ = Risque de détection (trop similaire à l'original)
+                st.markdown("""<div style="background:#1a1a2e;padding:8px 12px;border-radius:6px;margin-bottom:12px;font-size:0.85em">
+                🟢 ≥ 80% = Suffisamment unique &nbsp;|&nbsp; 🔴 < 80% = Trop similaire à l'original
                 </div>""", unsafe_allow_html=True)
 
-                cols = st.columns([2, 1, 1, 1, 1])
-                cols[0].markdown("**Fichier**")
-                cols[1].markdown("**Unicité**")
-                cols[2].markdown("**TikTok**")
-                cols[3].markdown("**Insta**")
-                cols[4].markdown("**YouTube**")
-
                 for a in analyses:
-                    cols = st.columns([2, 1, 1, 1, 1])
-                    cols[0].text(a['name'])
+                    cols = st.columns([1, 3, 1, 2, 1])
+                    # Nom
+                    cols[0].markdown(f"**{a['name']}**")
+                    # Tags modifications
+                    cols[1].markdown(format_modifications(a.get('modifications', {})), unsafe_allow_html=True)
+                    # Unicité vert/rouge
                     u = a['uniqueness']
-                    color = 'safe' if u >= 30 else 'warning' if u >= 20 else 'danger'
-                    cols[1].markdown(f"<span class='{color}'>{u:.0f}%</span>", unsafe_allow_html=True)
-                    cols[2].markdown("✅" if a['safe_tiktok'] else "❌")
-                    cols[3].markdown("✅" if a['safe_instagram'] else "❌")
-                    cols[4].markdown("✅" if a['safe_youtube'] else "❌")
-                    st.markdown(format_modifications(a.get('modifications', {})), unsafe_allow_html=True)
-                    st.markdown("<hr style='margin:2px 0;border-color:#333'>", unsafe_allow_html=True)
+                    color = '#00c853' if u >= 80 else '#f44336'
+                    cols[2].markdown(f"<span style='background:{color};color:white;padding:4px 8px;border-radius:5px;font-weight:bold'>{u:.0f}%</span>", unsafe_allow_html=True)
+                    # Preview vidéo
+                    output_path = a.get('output_path', '')
+                    if output_path and os.path.exists(output_path):
+                        cols[3].video(output_path)
+                        # Download
+                        with open(output_path, "rb") as f:
+                            cols[4].download_button(
+                                "⬇️",
+                                f.read(),
+                                file_name=Path(output_path).name,
+                                mime="video/mp4",
+                                key=f"dl_{a['name']}"
+                            )
 
     # ========== TAB 2: BULK UPLOAD ==========
     with tab2:
         st.header("📦 Bulk Upload - Traitement en masse")
         st.markdown("Upload jusqu'à **10 vidéos** et génère des variations pour chacune.")
-        
+
         col1, col2 = st.columns([1, 1])
-        
+
         with col1:
             uploaded_files = st.file_uploader(
                 "📹 Sélectionne plusieurs vidéos",
@@ -191,80 +175,77 @@ def main():
                 accept_multiple_files=True,
                 key="bulk"
             )
-            
+
             if uploaded_files:
                 if len(uploaded_files) > 10:
                     st.warning(f"⚠️ Maximum 10 vidéos. Seules les 10 premières seront traitées.")
                     uploaded_files = uploaded_files[:10]
                 st.success(f"📁 {len(uploaded_files)} vidéos sélectionnées")
-                
+
                 for f in uploaded_files[:5]:
                     st.text(f"  📹 {f.name}")
                 if len(uploaded_files) > 5:
                     st.text(f"  ... +{len(uploaded_files) - 5} autres")
-                
+
                 vars_per_video = st.slider("Variations par vidéo", 1, 10, 3, key="bulk_vars")
-                
+
                 total = len(uploaded_files) * vars_per_video
                 st.warning(f"⚠️ Total: **{total} vidéos** seront générées")
-                
+
                 if st.button("🚀 Lancer le Bulk Processing", type="primary", key="bulk_btn"):
-                    
+
                     # Create main folder for this bulk session
                     bulk_folder = get_dated_folder_name() + " - BULK"
                     bulk_path = os.path.join(output_dir, bulk_folder)
                     os.makedirs(bulk_path, exist_ok=True)
-                    
+
                     overall_progress = st.progress(0)
                     status = st.empty()
-                    results_container = st.container()
-                    
+
                     all_results = []
-                    
+
                     try:
                         from uniquifier import uniquify_video_ffmpeg
-                        
+
                         for vid_idx, uploaded_file in enumerate(uploaded_files):
                             video_name = Path(uploaded_file.name).stem
                             status.text(f"⏳ [{vid_idx + 1}/{len(uploaded_files)}] Traitement: {video_name}")
-                            
+
                             # Save original temporarily
                             with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp:
                                 tmp.write(uploaded_file.read())
                                 original_path = tmp.name
-                            
+
                             # Create subfolder for this video
                             video_folder = os.path.join(bulk_path, video_name)
                             os.makedirs(video_folder, exist_ok=True)
-                            
+
                             video_results = {
                                 'name': video_name,
                                 'variations': [],
                                 'success_count': 0
                             }
-                            
+
                             # Generate variations
                             for var_idx in range(vars_per_video):
                                 output_path = os.path.join(video_folder, f"V{var_idx + 1:02d}.mp4")
                                 result = uniquify_video_ffmpeg(original_path, output_path, intensity)
-                                
+
                                 if result["success"]:
                                     analysis = compare_to_original(original_path, output_path)
                                     video_results['variations'].append({
                                         'name': f"V{var_idx + 1:02d}",
+                                        'output_path': output_path,
                                         'uniqueness': analysis['uniqueness'],
-                                        'safe_tiktok': analysis['safe_tiktok'],
-                                        'safe_instagram': analysis['safe_instagram'],
-                                        'safe_youtube': analysis['safe_youtube'],
                                         'modifications': result.get("modifications", {})
                                     })
                                     video_results['success_count'] += 1
-                            
+
                             all_results.append(video_results)
                             os.unlink(original_path)
-                            
+
                             overall_progress.progress((vid_idx + 1) / len(uploaded_files))
-                        
+
                         st.session_state['bulk_results'] = all_results
                         st.session_state['bulk_folder'] = bulk_folder
                         st.session_state['bulk_path'] = bulk_path
@@ -273,77 +254,65 @@ def main():
                         total_success = sum(r['success_count'] for r in all_results)
                         st.success(f"✅ Terminé! {total_success} vidéos générées!")
 
-                        # Download buttons per video
-                        st.markdown("**Télécharger les variations :**")
-                        for r in all_results:
-                            with st.expander(f"⬇️ {r['name']} ({r['success_count']} fichiers)"):
-                                video_folder = os.path.join(bulk_path, r['name'])
-                                if os.path.exists(video_folder):
-                                    for mp4 in sorted(Path(video_folder).glob("*.mp4")):
-                                        with open(mp4, "rb") as f:
-                                            st.download_button(
-                                                f"⬇️ {mp4.name}",
-                                                f.read(),
-                                                file_name=f"{r['name']}_{mp4.name}",
-                                                mime="video/mp4",
-                                                key=f"dl_bulk_{r['name']}_{mp4.stem}"
-                                            )
-                        
                     except Exception as e:
                         st.error(f"Erreur: {e}")
-        
+
         with col2:
             st.subheader("📊 Résultats Bulk")
-            
+
             if 'bulk_results' in st.session_state:
                 results = st.session_state['bulk_results']
                 bulk_folder = st.session_state.get('bulk_folder', '')
-                
+                bulk_path = st.session_state.get('bulk_path', '')
+
                 st.markdown(f"<div class='folder-name'>📁 outputs/{bulk_folder}/</div>", unsafe_allow_html=True)
                 st.markdown("")
-                
+
                 # Summary stats
                 total_videos = sum(r['success_count'] for r in results)
                 all_variations = [v for r in results for v in r['variations']]
                 avg_uniqueness = sum(v['uniqueness'] for v in all_variations) / len(all_variations) if all_variations else 0
-                safe_count = sum(1 for v in all_variations if v['safe_tiktok'])
-                
+                safe_count = sum(1 for v in all_variations if v['uniqueness'] >= 80)
+
                 col_a, col_b, col_c = st.columns(3)
                 col_a.metric("📹 Total", total_videos)
                 col_b.metric("📊 Unicité moy.", f"{avg_uniqueness:.0f}%")
-                col_c.metric("✅ Safe TT", f"{safe_count}/{len(all_variations)}")
-                
-                st.markdown("---")
-                
+                col_c.metric("✅ Safe (≥80%)", f"{safe_count}/{len(all_variations)}")
+
+                st.markdown("""<div style="background:#1a1a2e;padding:6px 10px;border-radius:5px;margin:8px 0;font-size:0.8em">
+                🟢 ≥ 80% = Suffisamment unique &nbsp;|&nbsp; 🔴 < 80% = Trop similaire
+                </div>""", unsafe_allow_html=True)
+
                 # Per-video results
                 for r in results:
                     with st.expander(f"📹 {r['name']} ({r['success_count']} variations)"):
                         if r['variations']:
-                            st.markdown("""<div style="background:#1a1a2e;padding:6px 10px;border-radius:5px;margin-bottom:8px;font-size:0.8em">
-                            ✅ = Postable &nbsp;|&nbsp; ❌ = Risque de détection
-                            </div>""", unsafe_allow_html=True)
-
-                            cols = st.columns([2, 1, 1, 1, 1])
-                            cols[0].markdown("**Var**")
-                            cols[1].markdown("**Unicité**")
-                            cols[2].markdown("**TikTok**")
-                            cols[3].markdown("**Insta**")
-                            cols[4].markdown("**YouTube**")
-                            
                             for v in r['variations']:
-                                cols = st.columns([2, 1, 1, 1, 1])
-                                cols[0].text(v['name'])
+                                cols = st.columns([1, 3, 1, 2, 1])
+                                # Nom
+                                cols[0].markdown(f"**{v['name']}**")
+                                # Tags modifications
+                                cols[1].markdown(format_modifications(v.get('modifications', {})), unsafe_allow_html=True)
+                                # Unicité vert/rouge
                                 u = v['uniqueness']
-                                color = 'safe' if u >= 30 else 'warning' if u >= 20 else 'danger'
-                                cols[1].markdown(f"<span class='{color}'>{u:.0f}%</span>", unsafe_allow_html=True)
-                                cols[2].markdown("✅" if v['safe_tiktok'] else "❌")
-                                cols[3].markdown("✅" if v['safe_instagram'] else "❌")
-                                cols[4].markdown("✅" if v['safe_youtube'] else "❌")
-                                st.markdown(format_modifications(v.get('modifications', {})), unsafe_allow_html=True)
-                                st.markdown("<hr style='margin:2px 0;border-color:#333'>", unsafe_allow_html=True)
+                                color = '#00c853' if u >= 80 else '#f44336'
+                                cols[2].markdown(f"<span style='background:{color};color:white;padding:4px 8px;border-radius:5px;font-weight:bold'>{u:.0f}%</span>", unsafe_allow_html=True)
+                                # Preview vidéo
+                                vpath = v.get('output_path', '')
+                                if vpath and os.path.exists(vpath):
+                                    cols[3].video(vpath)
+                                    # Download
+                                    with open(vpath, "rb") as f:
+                                        cols[4].download_button(
+                                            "⬇️",
+                                            f.read(),
+                                            file_name=f"{r['name']}_{v['name']}.mp4",
+                                            mime="video/mp4",
+                                            key=f"dl_bulk_{r['name']}_{v['name']}"
+                                        )
             else:
                 st.info("👈 Upload plusieurs vidéos et lance le bulk processing")
-                
+
                 st.markdown("""
                 ### 📁 Structure des fichiers
 ```
@@ -364,20 +333,20 @@ def main():
     # ========== TAB 3: STATS ==========
     with tab3:
         st.header("📊 Statistiques globales")
-        
+
         if os.path.exists(output_dir):
             all_videos = list(Path(output_dir).rglob("*.mp4"))
             all_folders = [f for f in os.listdir(output_dir) if os.path.isdir(os.path.join(output_dir, f))]
             total_size = sum(f.stat().st_size for f in all_videos) / (1024 * 1024)
-            
+
             col1, col2, col3 = st.columns(3)
             col1.metric("📁 Sessions", len(all_folders))
             col2.metric("📹 Total vidéos", len(all_videos))
             col3.metric("💾 Espace", f"{total_size:.1f} MB")
-            
+
             st.markdown("---")
             st.markdown("### 📁 Toutes les sessions")
-            
+
             for folder in sorted(all_folders, reverse=True):
                 folder_path = os.path.join(output_dir, folder)
                 videos = list(Path(folder_path).rglob("*.mp4"))
