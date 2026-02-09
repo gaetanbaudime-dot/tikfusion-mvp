@@ -212,6 +212,7 @@ def uniquify_video_ffmpeg(input_path, output_path, intensity="medium", enabled_m
         "-c:v", "libx264", "-crf", str(crf), "-preset", "ultrafast",
         "-g", str(gop_size), "-bf", str(bf_count),
         "-c:a", "aac", "-b:a", "128k",
+        "-movflags", "+faststart",
     ])
 
     # Metadata (only if enabled)

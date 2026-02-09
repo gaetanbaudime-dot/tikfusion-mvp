@@ -560,9 +560,10 @@ def main():
                     cols[2].markdown(f"<span class='{badge}'>{u:.0f}%</span>", unsafe_allow_html=True)
                     output_path = a.get('output_path', '')
                     if output_path and os.path.exists(output_path):
-                        cols[3].video(output_path)
                         with open(output_path, "rb") as f:
-                            cols[4].download_button("⬇️", f.read(), file_name=Path(output_path).name, mime="video/mp4", key=f"dl_{a['name']}")
+                            video_bytes = f.read()
+                        cols[3].video(video_bytes, format="video/mp4")
+                        cols[4].download_button("⬇️", video_bytes, file_name=Path(output_path).name, mime="video/mp4", key=f"dl_{a['name']}")
 
     # ========== TAB 2: BULK UPLOAD ==========
     with tab2:
@@ -681,9 +682,10 @@ def main():
                                 cols[2].markdown(f"<span class='{badge}'>{u:.0f}%</span>", unsafe_allow_html=True)
                                 vpath = v.get('output_path', '')
                                 if vpath and os.path.exists(vpath):
-                                    cols[3].video(vpath)
                                     with open(vpath, "rb") as f:
-                                        cols[4].download_button("⬇️", f.read(), file_name=f"{r['name']}_{v['name']}.mp4", mime="video/mp4", key=f"dl_bulk_{r['name']}_{v['name']}")
+                                        vbytes = f.read()
+                                    cols[3].video(vbytes, format="video/mp4")
+                                    cols[4].download_button("⬇️", vbytes, file_name=f"{r['name']}_{v['name']}.mp4", mime="video/mp4", key=f"dl_bulk_{r['name']}_{v['name']}")
             else:
                 st.info("👈 Upload plusieurs vidéos et lance le traitement")
 
