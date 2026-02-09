@@ -9,8 +9,41 @@ import tempfile
 import base64
 from pathlib import Path
 from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+
+
+def _get_api_key():
+    """Charge la clé API PostBridge depuis .env ou session_state."""
+    if 'pb_api_key_saved' in st.session_state and st.session_state['pb_api_key_saved']:
+        return st.session_state['pb_api_key_saved']
+    key = os.getenv("POSTBRIDGE_API_KEY", "")
+    if key:
+        st.session_state['pb_api_key_saved'] = key
+    return key
+
+
+def _save_api_key(key):
+    """Sauvegarde la clé API dans .env et session_state."""
+    st.session_state['pb_api_key_saved'] = key
+    env_path = os.path.join(os.path.dirname(__file__), ".env")
+    lines = []
+    found = False
+    if os.path.exists(env_path):
+        with open(env_path, "r") as f:
+            for line in f:
+                if line.startswith("POSTBRIDGE_API_KEY="):
+                    lines.append(f"POSTBRIDGE_API_KEY={key}\n")
+                    found = True
+                else:
+                    lines.append(line)
+    if not found:
+        lines.append(f"POSTBRIDGE_API_KEY={key}\n")
+    with open(env_path, "w") as f:
+        f.writelines(lines)
 
 st.set_page_config(page_title="TikFusion x LTP", page_icon="assets/favicon.svg", layout="wide", initial_sidebar_state="collapsed")
 
@@ -573,6 +606,31 @@ def main():
         """, unsafe_allow_html=True)
 
         st.markdown("---")
+
+        # === POSTBRIDGE API KEY ===
+        st.markdown("### 🔑 PostBridge API")
+        current_key = _get_api_key()
+        masked = f"{'•' * 8}...{current_key[-6:]}" if len(current_key) > 6 else ""
+
+        if current_key:
+            st.markdown(f'<span style="color:#30D158;font-size:0.85rem">✅ Clé configurée : <code>{masked}</code></span>', unsafe_allow_html=True)
+
+        new_key = st.text_input(
+            "Clé API PostBridge",
+            type="password",
+            key="cfg_pb_key",
+            placeholder="pb_live_..." if not current_key else "Laisser vide pour garder la clé actuelle",
+            label_visibility="collapsed"
+        )
+        if st.button("💾 Sauvegarder la clé", key="cfg_save_key"):
+            if new_key.strip():
+                _save_api_key(new_key.strip())
+                st.success("✅ Clé sauvegardée")
+                st.rerun()
+            elif not current_key:
+                st.warning("Entre une clé API.")
+
+        st.markdown("---")
         if os.path.exists(output_dir):
             st.markdown("**📁 Sessions récentes**")
             folders = sorted([f for f in os.listdir(output_dir) if os.path.isdir(os.path.join(output_dir, f))], reverse=True)
@@ -799,20 +857,14 @@ def main():
 
     # ========== TAB 5: PUBLISH ==========
     with tab5:
-        # --- API KEY (compact) ---
-        api_key = st.text_input(
-            "🔑 Clé API PostBridge",
-            type="password",
-            key="pb_api_key",
-            help="post-bridge.com → Dashboard → API Keys"
-        )
+        api_key = _get_api_key()
 
         if not api_key:
             st.markdown("""<div class="apple-card" style="text-align:center;padding:40px">
-                <div style="font-size:2rem;margin-bottom:12px">🚀</div>
-                <p style="color:#F5F5F7;font-weight:600;margin:0">Connecte PostBridge</p>
+                <div style="font-size:2rem;margin-bottom:12px">🔑</div>
+                <p style="color:#F5F5F7;font-weight:600;margin:0">Configure ta clé PostBridge</p>
                 <p style="color:#48484A;font-size:0.8rem;margin:8px 0 0 0">
-                    Colle ta clé API ci-dessus pour publier sur TikTok, Instagram, YouTube…
+                    Va dans l'onglet <b>⚙️ Config</b> pour entrer ta clé API PostBridge.
                 </p>
             </div>""", unsafe_allow_html=True)
         else:
