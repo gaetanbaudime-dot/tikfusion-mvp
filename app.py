@@ -94,6 +94,48 @@ st.markdown("""
     .tag-pitch { background: #2C2C2E; color: #5E5CE6; border: 1px solid #3A3A3C; }
     .tag-meta { background: #2C2C2E; color: #BF5AF2; border: 1px solid #3A3A3C; }
 
+    /* Platform chips for Publish tab */
+    .platform-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 14px;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: 500;
+        margin: 2px 4px;
+        border: 1px solid #3A3A3C;
+    }
+    .chip-tiktok { background: #1C1C1E; color: #EE1D52; border-color: #EE1D52; }
+    .chip-instagram { background: #1C1C1E; color: #E1306C; border-color: #E1306C; }
+    .chip-youtube { background: #1C1C1E; color: #FF0000; border-color: #FF0000; }
+    .chip-facebook { background: #1C1C1E; color: #1877F2; border-color: #1877F2; }
+    .chip-twitter { background: #1C1C1E; color: #1DA1F2; border-color: #1DA1F2; }
+    .chip-linkedin { background: #1C1C1E; color: #0A66C2; border-color: #0A66C2; }
+    .chip-pinterest { background: #1C1C1E; color: #E60023; border-color: #E60023; }
+    .chip-threads { background: #1C1C1E; color: #FFFFFF; border-color: #FFFFFF; }
+    .chip-bluesky { background: #1C1C1E; color: #0085FF; border-color: #0085FF; }
+
+    /* Publish card */
+    .pub-account {
+        background: #1C1C1E;
+        border: 1px solid #2C2C2E;
+        border-radius: 12px;
+        padding: 12px 16px;
+        margin: 4px 0;
+    }
+    .pub-status {
+        display: inline-block;
+        padding: 3px 10px;
+        border-radius: 12px;
+        font-size: 0.75rem;
+        font-weight: 600;
+    }
+    .pub-scheduled { background: #FF9F0A33; color: #FF9F0A; }
+    .pub-posted { background: #30D15833; color: #30D158; }
+    .pub-processing { background: #007AFF33; color: #007AFF; }
+    .pub-failed { background: #FF453A33; color: #FF453A; }
+
     /* Uniqueness badges */
     .badge-safe {
         background: #30D158;
@@ -344,8 +386,8 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
-    # ============ TABS (config moved to last tab) ============
-    tab1, tab2, tab3, tab4 = st.tabs(["📤 Single", "📦 Bulk", "📊 Stats", "⚙️ Config"])
+    # ============ TABS ============
+    tab1, tab2, tab5, tab3, tab4 = st.tabs(["📤 Single", "📦 Bulk", "🚀 Publier", "📊 Stats", "⚙️ Config"])
 
     # ========== TAB 4: CONFIG (read first for variables) ==========
     with tab4:
@@ -720,6 +762,248 @@ def main():
                                     cols[4].download_button("⬇️", vbytes, file_name=f"{r['name']}_{v['name']}.mp4", mime="video/mp4", key=f"dl_bulk_{r['name']}_{v['name']}")
             else:
                 st.info("👈 Upload plusieurs vidéos et lance le traitement")
+
+    # ========== TAB 5: PUBLISH ==========
+    with tab5:
+        st.markdown("### 🚀 Publier")
+
+        # --- API KEY ---
+        api_key = st.text_input(
+            "🔑 Clé API PostBridge",
+            type="password",
+            key="pb_api_key",
+            help="Récupère ta clé sur post-bridge.com → Dashboard → API Keys"
+        )
+
+        if not api_key:
+            st.markdown("""<div class="apple-card">
+                <p style="color:#86868B;margin:0">Connecte ton compte <b>PostBridge</b> pour publier directement depuis TikFusion.</p>
+                <p style="color:#48484A;font-size:0.8rem;margin:8px 0 0 0">
+                    1. Crée un compte sur <b>post-bridge.com</b><br>
+                    2. Connecte tes comptes TikTok, Instagram, YouTube...<br>
+                    3. Copie ta clé API ici
+                </p>
+            </div>""", unsafe_allow_html=True)
+        else:
+            # --- LOAD ACCOUNTS ---
+            try:
+                from postbridge import list_accounts, upload_video, create_post, get_post_results, PLATFORM_ICONS
+
+                if 'pb_accounts' not in st.session_state or st.button("🔄 Rafraîchir les comptes", key="pb_refresh"):
+                    with st.spinner("Chargement des comptes..."):
+                        st.session_state['pb_accounts'] = list_accounts(api_key)
+
+                accounts = st.session_state.get('pb_accounts', [])
+
+                if not accounts:
+                    st.warning("Aucun compte connecté sur PostBridge. Connecte tes comptes TikTok/Instagram/YouTube dans ton dashboard PostBridge.")
+                else:
+                    # --- SHOW CONNECTED ACCOUNTS ---
+                    platforms_found = set(a.get("platform", "") for a in accounts)
+                    chips_html = " ".join(
+                        f'<span class="platform-chip chip-{p}">{PLATFORM_ICONS.get(p, "📱")} {p.title()}</span>'
+                        for p in sorted(platforms_found)
+                    )
+                    st.markdown(f"""<div style="margin-bottom:16px">{chips_html}</div>""", unsafe_allow_html=True)
+                    st.caption(f"{len(accounts)} compte(s) connecté(s)")
+
+                    st.markdown("---")
+
+                    # --- SELECT VIDEO ---
+                    st.markdown("#### 📹 Vidéo à publier")
+
+                    video_source = st.radio(
+                        "Source",
+                        ["📁 Depuis les variations générées", "📤 Upload direct"],
+                        key="pub_source",
+                        horizontal=True,
+                        label_visibility="collapsed"
+                    )
+
+                    selected_video_path = None
+
+                    if video_source == "📁 Depuis les variations générées":
+                        # Scan outputs folder for generated videos
+                        if os.path.exists(output_dir):
+                            all_mp4 = sorted(Path(output_dir).rglob("*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
+                            if all_mp4:
+                                video_options = {f"{p.parent.name}/{p.name}": str(p) for p in all_mp4[:50]}
+                                selected_label = st.selectbox("Sélectionne une variation", list(video_options.keys()), key="pub_video_select")
+                                selected_video_path = video_options.get(selected_label)
+                                if selected_video_path and os.path.exists(selected_video_path):
+                                    with open(selected_video_path, "rb") as f:
+                                        st.video(f.read(), format="video/mp4")
+                            else:
+                                st.info("Aucune variation trouvée. Génère d'abord des vidéos dans l'onglet Single ou Bulk.")
+                        else:
+                            st.info("Aucune variation trouvée.")
+                    else:
+                        uploaded_pub = st.file_uploader("📹 Upload une vidéo", type=['mp4', 'mov'], key="pub_upload")
+                        if uploaded_pub:
+                            st.video(uploaded_pub)
+                            # Save to temp
+                            with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp:
+                                tmp.write(uploaded_pub.read())
+                                selected_video_path = tmp.name
+
+                    if selected_video_path:
+                        st.markdown("---")
+
+                        # --- SELECT ACCOUNTS ---
+                        st.markdown("#### 👥 Comptes de publication")
+
+                        # Group by platform
+                        by_platform = {}
+                        for a in accounts:
+                            p = a.get("platform", "unknown")
+                            by_platform.setdefault(p, []).append(a)
+
+                        selected_account_ids = []
+                        platform_captions = {}
+
+                        for platform, platform_accounts in sorted(by_platform.items()):
+                            icon = PLATFORM_ICONS.get(platform, "📱")
+                            with st.expander(f"{icon} {platform.title()} — {len(platform_accounts)} compte(s)", expanded=True):
+                                for acc in platform_accounts:
+                                    acc_id = acc.get("id")
+                                    username = acc.get("username", f"Compte {acc_id}")
+                                    if st.checkbox(f"@{username}", key=f"pub_acc_{acc_id}", value=True):
+                                        selected_account_ids.append(acc_id)
+
+                                # Platform-specific caption
+                                custom_caption = st.text_area(
+                                    f"Description {platform.title()}",
+                                    key=f"pub_caption_{platform}",
+                                    height=68,
+                                    placeholder=f"Laisser vide = utiliser la description par défaut"
+                                )
+                                if custom_caption.strip():
+                                    platform_captions[platform] = {"caption": custom_caption.strip()}
+
+                        if not selected_account_ids:
+                            st.warning("Sélectionne au moins un compte.")
+                        else:
+                            st.markdown("---")
+
+                            # --- CAPTION + SCHEDULING ---
+                            st.markdown("#### ✏️ Publication")
+
+                            default_caption = st.text_area(
+                                "Description par défaut",
+                                key="pub_default_caption",
+                                height=100,
+                                placeholder="Ta description / caption pour toutes les plateformes..."
+                            )
+
+                            col_mode, col_date, col_time = st.columns([1, 1, 1])
+                            with col_mode:
+                                pub_mode = st.radio("Mode", ["⚡ Publier maintenant", "📅 Programmer"], key="pub_mode")
+                            scheduled_at = None
+                            if pub_mode == "📅 Programmer":
+                                with col_date:
+                                    pub_date = st.date_input("Date", key="pub_date")
+                                with col_time:
+                                    pub_time = st.time_input("Heure", key="pub_time")
+                                scheduled_at = f"{pub_date}T{pub_time}:00Z"
+
+                            st.markdown("---")
+
+                            # --- SUMMARY ---
+                            n_accounts = len(selected_account_ids)
+                            n_platforms = len(set(
+                                a.get("platform") for a in accounts if a.get("id") in selected_account_ids
+                            ))
+                            mode_label = f"programmé le {pub_date} à {pub_time}" if scheduled_at else "publication immédiate"
+
+                            st.markdown(f"""<div class="apple-card">
+                                <div style="display:flex;justify-content:space-between;align-items:center">
+                                    <div>
+                                        <span style="font-size:1rem;font-weight:600;color:#F5F5F7">Résumé</span><br>
+                                        <span style="color:#86868B;font-size:0.85rem">
+                                            {n_accounts} compte(s) sur {n_platforms} plateforme(s) — {mode_label}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>""", unsafe_allow_html=True)
+
+                            # --- PUBLISH BUTTON ---
+                            if st.button("🚀 Publier", type="primary", key="pub_go", use_container_width=True):
+                                if not default_caption.strip() and not platform_captions:
+                                    st.error("Ajoute au moins une description.")
+                                else:
+                                    with st.spinner("Upload de la vidéo..."):
+                                        try:
+                                            media_id = upload_video(api_key, selected_video_path)
+                                            st.success(f"✅ Vidéo uploadée")
+                                        except Exception as e:
+                                            st.error(f"Erreur upload: {e}")
+                                            media_id = None
+
+                                    if media_id:
+                                        with st.spinner("Création du post..."):
+                                            try:
+                                                result = create_post(
+                                                    api_key=api_key,
+                                                    caption=default_caption.strip() or ".",
+                                                    media_ids=[media_id],
+                                                    account_ids=selected_account_ids,
+                                                    scheduled_at=scheduled_at,
+                                                    platform_configs=platform_captions if platform_captions else None,
+                                                )
+                                                post_status = result.get("status", "processing")
+                                                post_id = result.get("id", "")
+
+                                                if post_status == "scheduled":
+                                                    st.success(f"📅 Post programmé ! ID: {post_id}")
+                                                elif post_status == "posted":
+                                                    st.success(f"🚀 Publié ! ID: {post_id}")
+                                                else:
+                                                    st.info(f"⏳ En cours de traitement... ID: {post_id}")
+
+                                                st.session_state['last_post_id'] = post_id
+
+                                            except Exception as e:
+                                                st.error(f"Erreur publication: {e}")
+
+                    # --- RECENT POSTS ---
+                    if st.session_state.get('last_post_id'):
+                        st.markdown("---")
+                        st.markdown("#### 📋 Dernier post")
+                        try:
+                            results = get_post_results(api_key, st.session_state['last_post_id'])
+                            for r in results.get("data", []):
+                                success = r.get("success", False)
+                                platform_data = r.get("platform_data", {})
+                                url = platform_data.get("url", "")
+                                acc_id = r.get("social_account_id")
+                                acc_info = next((a for a in accounts if a.get("id") == acc_id), {})
+                                platform = acc_info.get("platform", "?")
+                                username = acc_info.get("username", "?")
+                                icon = PLATFORM_ICONS.get(platform, "📱")
+
+                                status_class = "pub-posted" if success else "pub-failed"
+                                status_text = "Publié" if success else r.get("error", "Erreur")
+
+                                st.markdown(f"""<div class="pub-account">
+                                    <div style="display:flex;justify-content:space-between;align-items:center">
+                                        <span style="color:#F5F5F7">{icon} @{username}</span>
+                                        <span class="pub-status {status_class}">{status_text}</span>
+                                    </div>
+                                    {"<a href='" + url + "' target='_blank' style='color:#007AFF;font-size:0.8rem'>Voir le post ↗</a>" if url else ""}
+                                </div>""", unsafe_allow_html=True)
+                        except Exception:
+                            st.caption("Résultats en cours de chargement...")
+
+            except ImportError:
+                st.error("Module postbridge introuvable. Vérifie que src/postbridge.py existe.")
+            except Exception as e:
+                error_msg = str(e)
+                if "401" in error_msg or "403" in error_msg:
+                    st.error("🔑 Clé API invalide. Vérifie ta clé PostBridge.")
+                elif "Connection" in error_msg or "Timeout" in error_msg:
+                    st.error("🌐 Impossible de contacter PostBridge. Vérifie ta connexion.")
+                else:
+                    st.error(f"Erreur: {e}")
 
     # ========== TAB 3: STATS ==========
     with tab3:
