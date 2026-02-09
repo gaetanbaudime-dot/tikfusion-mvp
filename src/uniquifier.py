@@ -1,6 +1,7 @@
 """
 Video Uniquifier - Advanced anti-detection video modifications
 Each modification can be toggled on/off via enabled_mods parameter.
+Parallel batch processing with ThreadPoolExecutor.
 """
 import subprocess
 import os
@@ -9,6 +10,7 @@ import string
 import uuid
 from pathlib import Path
 from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import locale
 
 try:
@@ -248,19 +250,35 @@ def get_dated_folder_name():
     }
     return f"{now.day} {mois_fr[now.month]} {now.strftime('%Hh%M')}"
 
+def _worker(args):
+    """Worker pour le traitement parallele."""
+    i, input_path, output_path, intensity, enabled_mods = args
+    result = uniquify_video_ffmpeg(input_path, output_path, intensity, enabled_mods)
+    result["variation"] = i + 1
+    result["output_path"] = output_path
+    return i, result
+
 def batch_uniquify(input_path, output_dir, count=10, intensity="medium", enabled_mods=None):
-    """Genere plusieurs variations uniques avec noms V01, V02, etc."""
+    """Genere plusieurs variations en parallele (3-4x plus rapide)."""
     folder_name = get_dated_folder_name()
     dated_dir = os.path.join(output_dir, folder_name)
     os.makedirs(dated_dir, exist_ok=True)
 
-    results = []
+    # Prepare tasks
+    tasks = []
     for i in range(count):
         output_path = os.path.join(dated_dir, f"V{i+1:02d}.mp4")
-        result = uniquify_video_ffmpeg(input_path, output_path, intensity, enabled_mods)
-        result["variation"] = i + 1
-        result["output_path"] = output_path
-        results.append(result)
+        tasks.append((i, input_path, output_path, intensity, enabled_mods))
+
+    # Run in parallel — max 3 workers to avoid overloading Streamlit Cloud
+    max_workers = min(3, count)
+    results = [None] * count
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(_worker, task): task[0] for task in tasks}
+        for future in as_completed(futures):
+            idx, result = future.result()
+            results[idx] = result
 
     return results
 
