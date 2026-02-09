@@ -992,40 +992,35 @@ def main():
                     max_acc = min(len(filtered_accounts), 10)
 
                     if max_acc > 0:
-                        # Render avatar circles as HTML row
-                        avatars_html = '<div style="display:flex;flex-wrap:wrap;gap:16px;padding:8px 0 4px 0">'
-                        for acc in filtered_accounts[:max_acc]:
+                        # Each column = avatar + checkbox, add spacer column to prevent stretching
+                        col_widths = [1] * max_acc + [max(1, 10 - max_acc)]
+                        acc_cols = st.columns(col_widths)
+                        for idx, acc in enumerate(filtered_accounts[:max_acc]):
                             acc_id = acc.get("id")
                             platform = acc.get("platform", "unknown")
                             username = acc.get("username", "compte")
                             icon = PLATFORM_ICONS.get(platform, "📱")
-                            is_sel = st.session_state.get(f"pub_sel_{acc_id}", False)
+                            sel_key = f"pub_sel_{acc_id}"
+                            is_sel = st.session_state.get(sel_key, False)
                             border_c = "#007AFF" if is_sel else "#3A3A3C"
                             opa = "1" if is_sel else "0.5"
                             gs = "0%" if is_sel else "100%"
-                            avatars_html += f'''<div class="pb-acc {'selected' if is_sel else ''}" title="{username}">
-                                <div class="pb-acc-platform">{icon}</div>
-                                <div class="pb-acc-circle" style="border-color:{border_c};opacity:{opa};filter:grayscale({gs})">
-                                    <span style="font-size:1.1rem">{icon}</span>
-                                </div>
-                            </div>'''
-                        avatars_html += '</div>'
-                        st.markdown(avatars_html, unsafe_allow_html=True)
-
-                        # Checkboxes row (compact, under avatars)
-                        cb_cols = st.columns(max_acc)
-                        for idx, acc in enumerate(filtered_accounts[:max_acc]):
-                            acc_id = acc.get("id")
-                            platform = acc.get("platform", "unknown")
-                            sel_key = f"pub_sel_{acc_id}"
-                            with cb_cols[idx]:
-                                if st.checkbox("✓", value=st.session_state.get(sel_key, False), key=sel_key, label_visibility="collapsed"):
+                            with acc_cols[idx]:
+                                st.markdown(f'''<div class="pb-acc {'selected' if is_sel else ''}" title="{username}" style="margin:0 auto">
+                                    <div class="pb-acc-platform">{icon}</div>
+                                    <div class="pb-acc-circle" style="border-color:{border_c};opacity:{opa};filter:grayscale({gs})">
+                                        <span style="font-size:1.1rem">{icon}</span>
+                                    </div>
+                                </div>''', unsafe_allow_html=True)
+                                if st.checkbox("x", value=is_sel, key=sel_key, label_visibility="collapsed"):
                                     selected_account_ids.append(acc_id)
                                     selected_platforms.add(platform)
+                        # Spacer column stays empty
 
                         if len(filtered_accounts) > max_acc:
                             with st.expander(f"+{len(filtered_accounts) - max_acc} more"):
-                                extra_cols = st.columns(min(len(filtered_accounts) - max_acc, 10))
+                                extra_widths = [1] * min(len(filtered_accounts) - max_acc, 10) + [max(1, 10 - min(len(filtered_accounts) - max_acc, 10))]
+                                extra_cols = st.columns(extra_widths)
                                 for idx, acc in enumerate(filtered_accounts[max_acc:max_acc + 10]):
                                     acc_id = acc.get("id")
                                     platform = acc.get("platform", "unknown")
