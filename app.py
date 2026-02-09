@@ -326,6 +326,141 @@ def main():
             intensity = st.select_slider("🎚️ Intensité des modifications", options=["low", "medium", "high"], value="medium", key="cfg_intensity")
 
         st.markdown("---")
+        st.markdown("### 🎛️ Modifications anti-détection")
+        st.markdown("""<div class="legend">
+        Active ou désactive chaque modification. Le score estimé se met à jour en temps réel.
+        </div>""", unsafe_allow_html=True)
+
+        # === SECTION: VISUAL HASH (pHash/DCT) ===
+        st.markdown("#### 👁️ Anti Hash Visuel — *casse le perceptual hash (pHash/DCT)*")
+        st.caption("Poids détection TikTok/Insta : ~30-35%")
+
+        vc1, vc2 = st.columns(2)
+        with vc1:
+            mod_noise = st.toggle("📡 Pixel Noise", value=True, key="mod_noise",
+                help="Ajoute du bruit invisible par pixel. Le plus efficace contre pHash.")
+            mod_zoom = st.toggle("🔍 Zoom aléatoire", value=True, key="mod_zoom",
+                help="Zoom léger (2-7%) qui repositionne tous les pixels. Casse le hash.")
+        with vc2:
+            mod_gamma = st.toggle("🌗 Gamma", value=True, key="mod_gamma",
+                help="Modifie la courbe de luminosité globale. Subtil mais efficace.")
+            mod_hue = st.toggle("🎨 Décalage couleur", value=True, key="mod_hue",
+                help="Change la teinte de ±8-22°. pHash résiste partiellement.")
+
+        st.markdown("---")
+
+        # === SECTION: STRUCTURE (Deep Learning) ===
+        st.markdown("#### 🧠 Anti Deep Learning — *trompe l'analyse de structure*")
+        st.caption("Poids détection TikTok/Insta : ~25-30%")
+
+        sc1, sc2 = st.columns(2)
+        with sc1:
+            mod_hflip = st.toggle("🪞 Miroir horizontal", value=True, key="mod_hflip",
+                help="Inverse la vidéo horizontalement. Très efficace car change toutes les relations spatiales.")
+            mod_crop = st.toggle("✂️ Crop aléatoire", value=True, key="mod_crop",
+                help="Coupe les bords de 0.5-4%. Change les limites du frame.")
+        with sc2:
+            mod_speed = st.toggle("🔄 Changement vitesse", value=True, key="mod_speed",
+                help="Accélère ou ralentit de ±3-12%. Change le fingerprint temporel.")
+
+        st.markdown("---")
+
+        # === SECTION: AUDIO (Fingerprint) ===
+        st.markdown("#### 🔊 Anti Fingerprint Audio — *casse la détection type Shazam*")
+        st.caption("Poids détection TikTok/Insta : ~20-25%")
+
+        ac1, ac2 = st.columns(2)
+        with ac1:
+            mod_pitch = st.toggle("🎵 Pitch shift", value=True, key="mod_pitch",
+                help="Décale la fréquence audio de ±0.3-0.8 semitons. Imperceptible mais casse le fingerprint.")
+        with ac2:
+            mod_fps = st.toggle("🎞️ FPS shift", value=True, key="mod_fps",
+                help="Change le framerate de ±0.03-0.08 fps. Modifie le timing audio/vidéo.")
+
+        st.markdown("---")
+
+        # === SECTION: METADATA ===
+        st.markdown("#### 🏷️ Metadata — *brouille les traces du fichier*")
+        st.caption("Poids détection : ~5-10%")
+
+        mod_meta = st.toggle("🏷️ Metadata aléatoires", value=True, key="mod_meta",
+            help="Randomise titre, encodeur, date de création, UUID, etc.")
+
+        st.markdown("---")
+
+        # === SCORE PREVIEW ===
+        # Simulate a "typical" modification set with current toggles to show estimated score
+        preview_score = 0
+        score_details = []
+
+        if mod_noise:
+            pts = 12
+            preview_score += pts
+            score_details.append(f"📡 Noise: +{pts} pts")
+        if mod_zoom:
+            pts = 10
+            preview_score += pts
+            score_details.append(f"🔍 Zoom: +{pts} pts")
+        if mod_gamma:
+            pts = 4
+            preview_score += pts
+            score_details.append(f"🌗 Gamma: +{pts} pts")
+        if mod_hue:
+            pts = 2
+            preview_score += pts
+            score_details.append(f"🎨 Hue: +{pts} pts")
+        if mod_hflip:
+            # 40% chance in medium, so average contribution
+            pts = 6  # 15 * 0.4 average
+            preview_score += pts
+            score_details.append(f"🪞 Miroir: +{pts} pts (moy.)")
+        if mod_crop:
+            pts = 4
+            preview_score += pts
+            score_details.append(f"✂️ Crop: +{pts} pts")
+        if mod_speed:
+            pts = 2
+            preview_score += pts
+            score_details.append(f"🔄 Speed: +{pts} pts")
+        if mod_pitch:
+            pts = 15
+            preview_score += pts
+            score_details.append(f"🎵 Pitch: +{pts} pts")
+        if mod_fps:
+            pts = 2
+            preview_score += pts
+            score_details.append(f"🎞️ FPS: +{pts} pts")
+        # Volume always applied when pitch is on
+        if mod_pitch:
+            preview_score += 3
+            score_details.append(f"🔊 Volume: +3 pts")
+        if mod_meta:
+            pts = 5
+            preview_score += pts
+            score_details.append(f"🏷️ Meta: +{pts} pts")
+        # Re-encoding always happens
+        preview_score += 8
+        score_details.append(f"💾 Re-encoding: +8 pts")
+
+        preview_score = min(preview_score, 100)
+
+        badge_class = "badge-safe" if preview_score >= 80 else "badge-danger"
+        st.markdown(f"""
+        <div style="background:#1C1C1E;border:1px solid #2C2C2E;border-radius:12px;padding:16px;margin:8px 0">
+            <div style="display:flex;align-items:center;justify-content:space-between">
+                <span style="font-size:1.1rem;font-weight:600;color:#F5F5F7">📊 Score estimé moyen</span>
+                <span class="{badge_class}" style="font-size:1.2rem;padding:6px 16px">{preview_score}%</span>
+            </div>
+            <div style="color:#86868B;font-size:0.8rem;margin-top:8px">
+                {"  •  ".join(score_details)}
+            </div>
+            <div style="margin-top:8px;color:#48484A;font-size:0.75rem">
+                {"🟢 Au-dessus de 80% = suffisamment unique pour TikTok/Instagram" if preview_score >= 80 else "🔴 En dessous de 80% — active plus de modifications pour être safe"}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("---")
         if os.path.exists(output_dir):
             st.markdown("**📁 Sessions récentes**")
             folders = sorted([f for f in os.listdir(output_dir) if os.path.isdir(os.path.join(output_dir, f))], reverse=True)
@@ -343,6 +478,20 @@ def main():
         intensity = "medium"
     else:
         intensity = st.session_state['cfg_intensity']
+
+    # Collect enabled modifications from toggles
+    enabled_mods = {
+        "noise": st.session_state.get("mod_noise", True),
+        "zoom": st.session_state.get("mod_zoom", True),
+        "gamma": st.session_state.get("mod_gamma", True),
+        "hue": st.session_state.get("mod_hue", True),
+        "hflip": st.session_state.get("mod_hflip", True),
+        "crop": st.session_state.get("mod_crop", True),
+        "speed": st.session_state.get("mod_speed", True),
+        "pitch": st.session_state.get("mod_pitch", True),
+        "fps": st.session_state.get("mod_fps", True),
+        "meta": st.session_state.get("mod_meta", True),
+    }
 
     # ========== TAB 1: SINGLE UPLOAD ==========
     with tab1:
@@ -367,7 +516,7 @@ def main():
                         from uniquifier import batch_uniquify
 
                         status.text("⏳ Génération en cours...")
-                        results = batch_uniquify(original_path, output_dir, num_vars, intensity)
+                        results = batch_uniquify(original_path, output_dir, num_vars, intensity, enabled_mods)
 
                         folder_name = os.path.basename(os.path.dirname(results[0]["output_path"])) if results else ""
 
@@ -470,7 +619,7 @@ def main():
 
                             for var_idx in range(vars_per_video):
                                 output_path = os.path.join(video_folder, f"V{var_idx + 1:02d}.mp4")
-                                result = uniquify_video_ffmpeg(original_path, output_path, intensity)
+                                result = uniquify_video_ffmpeg(original_path, output_path, intensity, enabled_mods)
 
                                 if result["success"]:
                                     mods = result.get("modifications", {})
