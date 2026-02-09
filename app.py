@@ -127,18 +127,11 @@ st.markdown("""
     .tag-pitch { background: #2C2C2E; color: #5E5CE6; border: 1px solid #3A3A3C; }
     .tag-meta { background: #2C2C2E; color: #BF5AF2; border: 1px solid #3A3A3C; }
 
-    /* Publish — PostBridge-exact account avatars */
-    .pb-accounts-row {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 16px;
-        padding: 8px 0 16px 0;
-        align-items: flex-start;
-        overflow: visible;
-    }
+    /* Publish — PostBridge-exact */
     .pb-acc {
         position: relative;
         width: 48px;
+        display: inline-block;
         cursor: pointer;
     }
     .pb-acc-circle {
@@ -169,15 +162,15 @@ st.markdown("""
         position: absolute;
         top: -4px;
         left: -4px;
-        width: 22px;
-        height: 22px;
+        width: 20px;
+        height: 20px;
         border-radius: 50%;
         background: #1C1C1E;
         border: 1px solid #3A3A3C;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 0.6rem;
+        font-size: 0.55rem;
         z-index: 2;
     }
     .pb-section-title {
@@ -192,17 +185,6 @@ st.markdown("""
         color: #F5F5F7;
         margin: 0 0 8px 0;
     }
-    .pb-media-zone {
-        border: 2px dashed #007AFF55;
-        border-radius: 12px;
-        padding: 20px;
-        min-height: 100px;
-        background: #1C1C1E;
-        transition: border-color 0.2s;
-    }
-    .pb-media-zone:hover {
-        border-color: #007AFF;
-    }
     .pb-media-preview-box {
         background: #1C1C1E;
         border: 1px solid #2C2C2E;
@@ -210,37 +192,11 @@ st.markdown("""
         padding: 12px;
         text-align: center;
     }
-    .pb-config-section {
-        background: #1C1C1E;
-        border: 1px solid #2C2C2E;
-        border-radius: 10px;
-        padding: 12px 16px;
-        margin: 8px 0;
-    }
     .pb-caption-counter {
         text-align: right;
         color: #48484A;
         font-size: 0.75rem;
         margin-top: -6px;
-    }
-    /* Config option row (like PostBridge TikTok/IG config) */
-    .pb-config-row {
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
-        padding: 12px 0;
-        border-bottom: 1px solid #2C2C2E;
-    }
-    .pb-config-row:last-child { border-bottom: none; }
-    .pb-config-label {
-        font-size: 0.9rem;
-        font-weight: 600;
-        color: #F5F5F7;
-    }
-    .pb-config-desc {
-        font-size: 0.78rem;
-        color: #86868B;
-        margin-top: 2px;
     }
 
     /* Publish — status badges */
@@ -973,45 +929,40 @@ def main():
                     # ── PAGE TITLE ──
                     st.markdown('<p class="pb-page-title">Create video post</p>', unsafe_allow_html=True)
 
-                    # ── TOOLBAR: Search & Filter | Remember ──
-                    tb_left, tb_right = st.columns([3, 1])
-                    with tb_left:
+                    # ── TOOLBAR: Search & Filter (small) | Remember (right) ──
+                    tb1, tb2, tb3, tb4 = st.columns([2, 5, 1, 2])
+                    with tb1:
                         all_platforms = sorted(set(a.get("platform", "unknown") for a in accounts))
                         if len(all_platforms) > 1:
                             platform_options = ["All"] + all_platforms
                             selected_platform = st.selectbox(
-                                "🔍 Search & Filter",
-                                platform_options,
-                                key="pub_platform_filter",
-                                label_visibility="collapsed",
+                                "🔍 Filter", platform_options,
+                                key="pub_platform_filter", label_visibility="collapsed",
                             )
                         else:
                             selected_platform = "All"
-                    with tb_right:
-                        rcol1, rcol2 = st.columns([1, 1])
-                        with rcol1:
-                            if st.button("🔄", key="pb_refresh", help="Refresh accounts"):
-                                with st.spinner("..."):
-                                    st.session_state['pb_accounts'] = list_accounts(api_key)
-                                    st.rerun()
-                        with rcol2:
-                            remember_active = st.session_state.get('pb_remember', False)
-                            remember_icon = "🟢" if remember_active else "⚪"
-                            if st.button(f"{remember_icon} Remember", key="pb_remember_btn"):
-                                if not remember_active:
-                                    current_sel = [a.get("id") for a in accounts if st.session_state.get(f"pub_sel_{a.get('id')}", False)]
-                                    st.session_state['pb_remembered_ids'] = current_sel
-                                    st.session_state['pb_remember'] = True
-                                else:
-                                    st.session_state['pb_remember'] = False
-                                    st.session_state.pop('pb_remembered_ids', None)
+                    with tb3:
+                        if st.button("🔄", key="pb_refresh", help="Refresh"):
+                            with st.spinner("..."):
+                                st.session_state['pb_accounts'] = list_accounts(api_key)
                                 st.rerun()
+                    with tb4:
+                        remember_active = st.session_state.get('pb_remember', False)
+                        if st.button(f"{'🟢' if remember_active else '⚪'} Remember", key="pb_remember_btn"):
+                            if not remember_active:
+                                current_sel = [a.get("id") for a in accounts if st.session_state.get(f"pub_sel_{a.get('id')}", False)]
+                                st.session_state['pb_remembered_ids'] = current_sel
+                                st.session_state['pb_remember'] = True
+                            else:
+                                st.session_state['pb_remember'] = False
+                                st.session_state.pop('pb_remembered_ids', None)
+                            st.rerun()
 
                     filtered_accounts = accounts if selected_platform == "All" else [
                         a for a in accounts if a.get("platform") == selected_platform
                     ]
 
-                    # ── ACCOUNT AVATARS (PostBridge exact: 48px circles, platform icon top-left) ──
+                    # ── ACCOUNT AVATARS ──
                     remembered_ids = st.session_state.get('pb_remembered_ids', [])
                     for acc in filtered_accounts:
                         acc_id = acc.get("id")
@@ -1019,50 +970,53 @@ def main():
                         if key not in st.session_state:
                             st.session_state[key] = acc_id in remembered_ids if remembered_ids else False
 
-                    # Render avatars as columns with toggles
-                    max_per_row = min(len(filtered_accounts), 10)
                     selected_account_ids = []
                     selected_platforms = set()
+                    max_acc = min(len(filtered_accounts), 10)
 
-                    if max_per_row > 0:
-                        acc_cols = st.columns(max_per_row)
-                        for idx, acc in enumerate(filtered_accounts[:max_per_row]):
+                    if max_acc > 0:
+                        # Render avatar circles as HTML row
+                        avatars_html = '<div style="display:flex;flex-wrap:wrap;gap:16px;padding:8px 0 4px 0">'
+                        for acc in filtered_accounts[:max_acc]:
                             acc_id = acc.get("id")
                             platform = acc.get("platform", "unknown")
                             username = acc.get("username", "compte")
                             icon = PLATFORM_ICONS.get(platform, "📱")
-                            sel_key = f"pub_sel_{acc_id}"
-                            is_selected = st.session_state.get(sel_key, False)
+                            is_sel = st.session_state.get(f"pub_sel_{acc_id}", False)
+                            border_c = "#007AFF" if is_sel else "#3A3A3C"
+                            opa = "1" if is_sel else "0.5"
+                            gs = "0%" if is_sel else "100%"
+                            avatars_html += f'''<div class="pb-acc {'selected' if is_sel else ''}" title="{username}">
+                                <div class="pb-acc-platform">{icon}</div>
+                                <div class="pb-acc-circle" style="border-color:{border_c};opacity:{opa};filter:grayscale({gs})">
+                                    <span style="font-size:1.1rem">{icon}</span>
+                                </div>
+                            </div>'''
+                        avatars_html += '</div>'
+                        st.markdown(avatars_html, unsafe_allow_html=True)
 
-                            with acc_cols[idx]:
-                                # Avatar circle with platform badge top-left
-                                border_c = "#007AFF" if is_selected else "#3A3A3C"
-                                opacity = "1" if is_selected else "0.5"
-                                grayscale = "0%" if is_selected else "100%"
-                                st.markdown(f'''<div class="pb-acc {'selected' if is_selected else ''}"
-                                    title="{username}" style="margin:0 auto">
-                                    <div class="pb-acc-platform">{icon}</div>
-                                    <div class="pb-acc-circle" style="border-color:{border_c};
-                                        opacity:{opacity};filter:grayscale({grayscale})">
-                                        <span style="font-size:1.1rem">{icon}</span>
-                                    </div>
-                                </div>''', unsafe_allow_html=True)
-                                toggled = st.toggle(username[:10], value=is_selected, key=sel_key, label_visibility="collapsed")
-                                if toggled:
+                        # Checkboxes row (compact, under avatars)
+                        cb_cols = st.columns(max_acc)
+                        for idx, acc in enumerate(filtered_accounts[:max_acc]):
+                            acc_id = acc.get("id")
+                            platform = acc.get("platform", "unknown")
+                            sel_key = f"pub_sel_{acc_id}"
+                            with cb_cols[idx]:
+                                if st.checkbox("✓", value=st.session_state.get(sel_key, False), key=sel_key, label_visibility="collapsed"):
                                     selected_account_ids.append(acc_id)
                                     selected_platforms.add(platform)
 
-                        if len(filtered_accounts) > max_per_row:
-                            with st.expander(f"+{len(filtered_accounts) - max_per_row} more accounts"):
-                                extra_cols = st.columns(min(len(filtered_accounts) - max_per_row, 10))
-                                for idx, acc in enumerate(filtered_accounts[max_per_row:max_per_row + 10]):
+                        if len(filtered_accounts) > max_acc:
+                            with st.expander(f"+{len(filtered_accounts) - max_acc} more"):
+                                extra_cols = st.columns(min(len(filtered_accounts) - max_acc, 10))
+                                for idx, acc in enumerate(filtered_accounts[max_acc:max_acc + 10]):
                                     acc_id = acc.get("id")
                                     platform = acc.get("platform", "unknown")
                                     username = acc.get("username", "compte")
                                     icon = PLATFORM_ICONS.get(platform, "📱")
                                     sel_key = f"pub_sel_{acc_id}"
                                     with extra_cols[idx]:
-                                        if st.toggle(f"{icon} @{username[:10]}", value=st.session_state.get(sel_key, False), key=sel_key):
+                                        if st.checkbox(f"{icon} @{username[:10]}", value=st.session_state.get(sel_key, False), key=sel_key):
                                             selected_account_ids.append(acc_id)
                                             selected_platforms.add(platform)
                     else:
@@ -1149,19 +1103,7 @@ def main():
                                                            help="Disable comments on this post")
 
                     with col_right:
-                        # ── MEDIA PREVIEW ──
-                        st.markdown('<div class="pb-media-preview-box">', unsafe_allow_html=True)
-                        st.markdown('<p class="pb-section-title">Media Preview</p>', unsafe_allow_html=True)
-                        if selected_video_path and os.path.exists(selected_video_path):
-                            st.video(selected_video_path, format="video/mp4")
-                            st.caption(Path(selected_video_path).name)
-                        else:
-                            st.markdown('<div style="padding:40px 0;text-align:center;color:#48484A;font-size:0.85rem">Select a video</div>', unsafe_allow_html=True)
-                        st.markdown('</div>', unsafe_allow_html=True)
-
-                        st.markdown("")
-
-                        # ── SCHEDULE POST ──
+                        # ── SCHEDULE POST (top of right column, like PostBridge) ──
                         schedule_on = st.toggle("Schedule post", key="pub_schedule_toggle")
                         scheduled_at = None
                         if schedule_on:
@@ -1171,8 +1113,6 @@ def main():
                             with sched_cols[1]:
                                 pub_time = st.time_input("Time", key="pub_time")
                             scheduled_at = f"{pub_date}T{pub_time}:00Z"
-
-                        st.markdown("")
 
                         # ── ACTION BUTTONS ──
                         can_publish = selected_video_path and selected_account_ids
@@ -1253,6 +1193,18 @@ def main():
                                 st.caption("⚠ Select a video to post")
                             elif not selected_account_ids:
                                 st.caption("⚠ Select an account to post to")
+
+                        st.markdown("")
+
+                        # ── MEDIA PREVIEW (below actions, like PostBridge) ──
+                        st.markdown('<div class="pb-media-preview-box">', unsafe_allow_html=True)
+                        st.markdown('<p class="pb-section-title">Media Preview</p>', unsafe_allow_html=True)
+                        if selected_video_path and os.path.exists(selected_video_path):
+                            st.video(selected_video_path, format="video/mp4")
+                            st.caption(Path(selected_video_path).name)
+                        else:
+                            st.markdown('<div style="padding:30px 0;text-align:center;color:#48484A;font-size:0.85rem">No media selected</div>', unsafe_allow_html=True)
+                        st.markdown('</div>', unsafe_allow_html=True)
 
                     # ── RECENT POST RESULTS ──
                     if st.session_state.get('last_post_id'):
