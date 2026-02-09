@@ -898,49 +898,75 @@ def main():
                 if not accounts:
                     st.warning("Aucun compte connecté. Ajoute tes comptes sur post-bridge.com")
                 else:
-                    # === 1. ACCOUNT AVATARS — clickable circles ===
-                    st.markdown('<p style="color:#86868B;font-size:0.8rem;margin-bottom:4px">Sélectionne les comptes</p>', unsafe_allow_html=True)
+                    # === 1. ACCOUNT AVATARS — circles with profile pics ===
+                    def _get_avatar(acc):
+                        """Try common API fields for profile picture URL."""
+                        for field in ("profile_picture_url", "avatar_url", "picture", "profile_image_url", "image_url", "avatar"):
+                            url = acc.get(field)
+                            if url and isinstance(url, str) and url.startswith("http"):
+                                return url
+                        return None
 
-                    # Render account toggles as checkboxes in a horizontal row
-                    avatar_cols = st.columns(min(len(accounts), 8))
-                    selected_account_ids = []
-
-                    for idx, acc in enumerate(accounts[:8]):
-                        acc_id = acc.get("id")
+                    # Build avatar HTML
+                    avatars_html = '<div class="pub-avatars">'
+                    for idx, acc in enumerate(accounts[:12]):
+                        acc_id = acc.get("id", "")
                         platform = acc.get("platform", "unknown")
-                        username = acc.get("username", f"Compte")
+                        username = acc.get("username", "compte")
                         icon = PLATFORM_ICONS.get(platform, "📱")
-                        col_idx = idx % len(avatar_cols)
+                        avatar_url = _get_avatar(acc)
 
-                        with avatar_cols[col_idx]:
-                            is_selected = st.checkbox(
-                                f"{icon} @{username[:12]}",
-                                value=True,
-                                key=f"pub_acc_{acc_id}",
-                                label_visibility="visible"
-                            )
-                            if is_selected:
+                        if avatar_url:
+                            circle_content = f'<img src="{avatar_url}" style="width:100%;height:100%;border-radius:50%;object-fit:cover" />'
+                        else:
+                            circle_content = f'<span style="font-size:1.4rem">{icon}</span>'
+
+                        avatars_html += f'''<div class="pub-avatar">
+                            <div class="pub-avatar-circle">{circle_content}</div>
+                            <div class="pub-avatar-platform">{icon}</div>
+                            <div class="pub-avatar-name">@{username[:10]}</div>
+                        </div>'''
+                    avatars_html += '</div>'
+                    st.markdown(avatars_html, unsafe_allow_html=True)
+
+                    # Account selection (checkboxes below avatars)
+                    selected_account_ids = []
+                    sel_cols = st.columns(min(len(accounts), 6))
+                    for idx, acc in enumerate(accounts[:6]):
+                        acc_id = acc.get("id")
+                        username = acc.get("username", "compte")
+                        platform = acc.get("platform", "")
+                        icon = PLATFORM_ICONS.get(platform, "📱")
+                        with sel_cols[idx]:
+                            if st.checkbox(f"{icon} {username[:10]}", value=True, key=f"pub_acc_{acc_id}"):
                                 selected_account_ids.append(acc_id)
-
-                    if len(accounts) > 8:
-                        st.caption(f"+{len(accounts) - 8} autres comptes non affichés")
+                    if len(accounts) > 6:
+                        # Select remaining accounts
+                        with st.expander(f"+{len(accounts) - 6} autres comptes"):
+                            for acc in accounts[6:]:
+                                acc_id = acc.get("id")
+                                username = acc.get("username", "compte")
+                                platform = acc.get("platform", "")
+                                icon = PLATFORM_ICONS.get(platform, "📱")
+                                if st.checkbox(f"{icon} @{username}", value=True, key=f"pub_acc_{acc_id}"):
+                                    selected_account_ids.append(acc_id)
 
                     st.markdown("---")
 
-                    # === 2. MAIN CONTENT: Video + Caption | Actions ===
-                    col_main, col_actions = st.columns([3, 1])
+                    # === 2. TWO-COLUMN LAYOUT like PostBridge ===
+                    col_left, col_right = st.columns([2, 1])
 
-                    with col_main:
-                        # --- VIDEO ---
+                    selected_video_path = None
+
+                    with col_left:
+                        # --- VIDEO SOURCE (small) ---
                         video_source = st.radio(
-                            "Source vidéo",
+                            "Source",
                             ["📁 Variations", "📤 Upload"],
                             key="pub_source",
                             horizontal=True,
                             label_visibility="collapsed"
                         )
-
-                        selected_video_path = None
 
                         if video_source == "📁 Variations":
                             if os.path.exists(output_dir):
@@ -949,9 +975,6 @@ def main():
                                     video_options = {f"{p.parent.name}/{p.name}": str(p) for p in all_mp4[:50]}
                                     selected_label = st.selectbox("Vidéo", list(video_options.keys()), key="pub_video_select", label_visibility="collapsed")
                                     selected_video_path = video_options.get(selected_label)
-                                    if selected_video_path and os.path.exists(selected_video_path):
-                                        with open(selected_video_path, "rb") as f:
-                                            st.video(f.read(), format="video/mp4")
                                 else:
                                     st.info("Aucune variation. Génère d'abord des vidéos.")
                             else:
@@ -959,28 +982,41 @@ def main():
                         else:
                             uploaded_pub = st.file_uploader("Upload", type=['mp4', 'mov'], key="pub_upload", label_visibility="collapsed")
                             if uploaded_pub:
-                                st.video(uploaded_pub)
                                 with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp:
                                     tmp.write(uploaded_pub.read())
                                     selected_video_path = tmp.name
 
-                        # --- CAPTION ---
-                        st.markdown("")
+                        # --- MAIN CAPTION ---
+                        st.markdown('<p style="color:#86868B;font-size:0.85rem;font-weight:500;margin:16px 0 4px 0">Main Caption</p>', unsafe_allow_html=True)
                         default_caption = st.text_area(
                             "Main Caption",
                             key="pub_default_caption",
-                            height=120,
-                            placeholder="Ta description / caption...",
+                            height=150,
+                            placeholder="Start writing your post here...",
                             label_visibility="collapsed"
                         )
                         char_count = len(default_caption)
                         st.markdown(f'<p style="text-align:right;color:#48484A;font-size:0.75rem;margin-top:-8px">{char_count}/2200</p>', unsafe_allow_html=True)
 
-                    with col_actions:
-                        # --- SCHEDULING ---
-                        schedule_on = st.toggle("📅 Programmer", key="pub_schedule_toggle")
-                        scheduled_at = None
+                    with col_right:
+                        # --- MEDIA PREVIEW (like PostBridge right panel) ---
+                        st.markdown('<p style="color:#86868B;font-size:0.85rem;font-weight:500">Media Preview</p>', unsafe_allow_html=True)
+                        if selected_video_path and os.path.exists(selected_video_path):
+                            st.video(selected_video_path, format="video/mp4")
+                            st.caption(Path(selected_video_path).name)
+                        elif video_source == "📤 Upload" and uploaded_pub:
+                            st.video(uploaded_pub)
+                        else:
+                            st.markdown("""<div style="background:#1C1C1E;border:1px dashed #3A3A3C;border-radius:12px;
+                                padding:40px;text-align:center;color:#48484A;font-size:0.85rem">
+                                Sélectionne une vidéo
+                            </div>""", unsafe_allow_html=True)
 
+                        st.markdown("---")
+
+                        # --- SCHEDULE TOGGLE ---
+                        schedule_on = st.toggle("Schedule post", key="pub_schedule_toggle")
+                        scheduled_at = None
                         if schedule_on:
                             pub_date = st.date_input("Date", key="pub_date")
                             pub_time = st.time_input("Heure", key="pub_time")
@@ -988,15 +1024,15 @@ def main():
 
                         st.markdown("")
 
-                        # --- PUBLISH BUTTON ---
+                        # --- POST BUTTON ---
                         can_publish = selected_video_path and selected_account_ids
-                        btn_label = "📅 Programmer" if schedule_on else "🚀 Publier"
+                        btn_label = "📅 Programmer" if schedule_on else "🚀 Post now"
 
                         if st.button(btn_label, type="primary", key="pub_go", use_container_width=True, disabled=not can_publish):
                             if not default_caption.strip():
                                 st.error("Ajoute une description.")
                             else:
-                                with st.spinner("Upload..."):
+                                with st.spinner("Upload de la vidéo..."):
                                     try:
                                         media_id = upload_video(api_key, selected_video_path)
                                     except Exception as e:
