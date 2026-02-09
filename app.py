@@ -127,13 +127,18 @@ st.markdown("""
     .tag-pitch { background: #2C2C2E; color: #5E5CE6; border: 1px solid #3A3A3C; }
     .tag-meta { background: #2C2C2E; color: #BF5AF2; border: 1px solid #3A3A3C; }
 
-    /* Publish — compact checkboxes under avatars */
+    /* Publish — hide checkboxes, show only tiny dot */
     .stCheckbox {
-        margin-top: -10px !important;
+        margin-top: -4px !important;
+        margin-bottom: -12px !important;
     }
     .stCheckbox label {
         min-height: 0 !important;
-        padding: 0 !important;
+        padding: 2px 0 !important;
+        justify-content: center !important;
+    }
+    .stCheckbox label > span:first-child {
+        transform: scale(0.65);
     }
     .stCheckbox label span[data-testid="stCheckboxLabel"] {
         display: none !important;
