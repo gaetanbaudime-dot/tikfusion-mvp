@@ -831,8 +831,10 @@ def main():
                                 selected_label = st.selectbox("Sélectionne une variation", list(video_options.keys()), key="pub_video_select")
                                 selected_video_path = video_options.get(selected_label)
                                 if selected_video_path and os.path.exists(selected_video_path):
-                                    with open(selected_video_path, "rb") as f:
-                                        st.video(f.read(), format="video/mp4")
+                                    _, col_vid, _ = st.columns([2, 1, 2])
+                                    with col_vid:
+                                        with open(selected_video_path, "rb") as f:
+                                            st.video(f.read(), format="video/mp4")
                             else:
                                 st.info("Aucune variation trouvée. Génère d'abord des vidéos dans l'onglet Single ou Bulk.")
                         else:
@@ -840,7 +842,9 @@ def main():
                     else:
                         uploaded_pub = st.file_uploader("📹 Upload une vidéo", type=['mp4', 'mov'], key="pub_upload")
                         if uploaded_pub:
-                            st.video(uploaded_pub)
+                            _, col_vid2, _ = st.columns([2, 1, 2])
+                            with col_vid2:
+                                st.video(uploaded_pub)
                             # Save to temp
                             with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp:
                                 tmp.write(uploaded_pub.read())
