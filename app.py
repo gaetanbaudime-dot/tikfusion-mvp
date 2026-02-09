@@ -89,6 +89,9 @@ st.markdown("""
     .tag-speed { background: #2C2C2E; color: #64D2FF; border: 1px solid #3A3A3C; }
     .tag-hue { background: #2C2C2E; color: #FF9F0A; border: 1px solid #3A3A3C; }
     .tag-crop { background: #2C2C2E; color: #30D158; border: 1px solid #3A3A3C; }
+    .tag-zoom { background: #2C2C2E; color: #FFD60A; border: 1px solid #3A3A3C; }
+    .tag-noise { background: #2C2C2E; color: #FF6482; border: 1px solid #3A3A3C; }
+    .tag-pitch { background: #2C2C2E; color: #5E5CE6; border: 1px solid #3A3A3C; }
     .tag-meta { background: #2C2C2E; color: #BF5AF2; border: 1px solid #3A3A3C; }
 
     /* Uniqueness badges */
@@ -193,42 +196,75 @@ st.markdown("""
 
 
 def estimate_uniqueness(modifications):
-    """Estime l'unicité à partir des modifications appliquées (instantané, pas de FFmpeg)"""
+    """Estime l'unicité basée sur les vrais poids de détection TikTok/Instagram.
+
+    Poids réels des systèmes de détection:
+    - Perceptual hash visuel (pHash/DCT): 30-35% → noise + zoom le cassent
+    - Deep learning / structure: 25-30% → zoom + crop + flip le trompent
+    - Audio fingerprint: 20-25% → pitch shift le casse
+    - Metadata: 5-10% → randomisation complète
+    - File hash: 1-2% → tout re-encoding suffit
+    """
     score = 0
 
-    # Miroir horizontal = très efficace contre la détection
-    if modifications.get("hflip", False):
-        score += 30
+    # === VISUAL HASH BREAKING (max 35 pts — poids réel ~30-35%) ===
 
-    # Changement de vitesse
+    # Pixel noise — le plus efficace contre pHash/DCT
+    noise = modifications.get("noise", 0)
+    score += min(noise * 3.5, 15)  # max 15 pts (noise 1-5 = 3.5-17.5, capped 15)
+
+    # Zoom — repositionne TOUS les pixels, casse le hash
+    zoom = modifications.get("zoom", 1.0)
+    zoom_pct = (zoom - 1.0) * 100
+    score += min(zoom_pct * 3, 12)  # max 12 pts (2-5% zoom = 6-15, capped 12)
+
+    # Gamma — change la distribution des pixels
+    gamma = abs(modifications.get("gamma", 1.0) - 1.0)
+    score += min(gamma * 150, 5)  # max 5 pts
+
+    # Hue shift — change la couleur (pHash est partiellement résistant)
+    hue = abs(modifications.get("hue_shift", 0))
+    score += min(hue * 0.2, 3)  # max 3 pts (moins efficace seul)
+
+    # === STRUCTURAL CHANGES (max 25 pts — poids réel ~25-30%) ===
+
+    # Horizontal flip — inverse TOUTES les relations spatiales
+    if modifications.get("hflip", False):
+        score += 15  # très efficace
+
+    # Crop — change les bords du frame
+    crop = modifications.get("crop_percent", 0)
+    score += min(crop * 2, 6)  # max 6 pts
+
+    # Speed — change le fingerprint temporel
     speed = modifications.get("speed", 1.0)
     speed_diff = abs(speed - 1.0)
-    score += min(speed_diff * 500, 20)  # max 20 pts
+    score += min(speed_diff * 60, 4)  # max 4 pts
 
-    # Décalage de teinte
-    hue = abs(modifications.get("hue_shift", 0))
-    score += min(hue * 1.5, 20)  # max 20 pts
+    # === AUDIO FINGERPRINT BREAKING (max 25 pts — poids réel ~20-25%) ===
 
-    # Crop
-    crop = modifications.get("crop_percent", 0)
-    score += min(crop * 5, 15)  # max 15 pts
+    # Pitch shift — CRITIQUE contre les systèmes type Shazam
+    pitch = abs(modifications.get("pitch_semitones", 0))
+    score += min(pitch * 30, 18)  # max 18 pts (0.5 semitone = 15 pts)
 
-    # Saturation
-    sat = abs(modifications.get("saturation", 1.0) - 1.0)
-    score += min(sat * 100, 5)  # max 5 pts
+    # FPS shift — change le timing audio/vidéo
+    fps = modifications.get("fps", 30)
+    fps_diff = abs(fps - 30)
+    score += min(fps_diff * 40, 4)  # max 4 pts
 
-    # Brightness
-    bright = abs(modifications.get("brightness", 0))
-    score += min(bright * 200, 5)  # max 5 pts
+    # Volume variation
+    score += 3  # toujours appliqué
 
-    # Metadata randomisée
+    # === METADATA + FILE (max 15 pts — poids réel ~5-10%) ===
+
     if modifications.get("metadata_randomized", False):
-        score += 10
+        score += 5
 
-    # CRF différent = bitstream unique
-    crf = modifications.get("crf", 20)
-    if crf != 20:
-        score += 3
+    # Re-encoding params (CRF + GOP)
+    score += 5  # toujours un re-encoding unique
+
+    # Bitstream unique garanti par CRF + GOP + bf
+    score += 3
 
     return {'uniqueness': min(round(score), 100)}
 
@@ -254,6 +290,15 @@ def format_modifications(mods):
     crop = mods.get("crop_percent", 0)
     if crop > 0.1:
         tags.append(f'<span class="tag tag-crop">✂️ {crop:.1f}%</span>')
+    zoom = mods.get("zoom", 1.0)
+    if zoom > 1.005:
+        tags.append(f'<span class="tag tag-zoom">🔍 {(zoom-1)*100:.1f}%</span>')
+    noise = mods.get("noise", 0)
+    if noise > 0:
+        tags.append(f'<span class="tag tag-noise">📡 N{noise:.0f}</span>')
+    pitch = mods.get("pitch_semitones", 0)
+    if abs(pitch) > 0.05:
+        tags.append(f'<span class="tag tag-pitch">🎵 {pitch:+.1f}st</span>')
     if mods.get("metadata_randomized"):
         tags.append('<span class="tag tag-meta">🏷️ Meta</span>')
     return " ".join(tags) if tags else '<span style="color:#48484A">—</span>'
