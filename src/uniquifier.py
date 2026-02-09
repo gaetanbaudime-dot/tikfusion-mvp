@@ -90,7 +90,7 @@ def uniquify_video_ffmpeg(input_path, output_path, intensity="medium"):
     if audio_filter:
         cmd.extend(["-af", audio_filter])
 
-    cmd.extend(["-c:v", "libx264", "-crf", str(crf), "-preset", "fast", "-c:a", "aac", "-b:a", "128k"])
+    cmd.extend(["-c:v", "libx264", "-crf", str(crf), "-preset", "ultrafast", "-c:a", "aac", "-b:a", "128k"])
 
     # Métadonnées aléatoires (max variées entre chaque variation)
     cmd.extend([

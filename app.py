@@ -1,5 +1,5 @@
 """
-TikFusion x LTP - Apple-inspired design
+TikFusion - Apple-inspired design
 """
 import streamlit as st
 import os
@@ -12,7 +12,7 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
-st.set_page_config(page_title="TikFusion x LTP", page_icon="🎬", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="TikFusion", page_icon="🎬", layout="wide", initial_sidebar_state="collapsed")
 
 # ============ APPLE-INSPIRED CSS ============
 st.markdown("""
@@ -152,9 +152,15 @@ st.markdown("""
         border-radius: 8px;
         padding: 8px 20px;
         font-weight: 500;
+        color: #86868B !important;
     }
     .stTabs [aria-selected="true"] {
         background: #007AFF !important;
+        color: #FFFFFF !important;
+    }
+    .stTabs [data-baseweb="tab"] p,
+    .stTabs [data-baseweb="tab"] span {
+        color: inherit !important;
     }
 
     /* Button styling */
@@ -186,17 +192,45 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-def compare_to_original(original_path, variation_path):
-    """Compare une variation à l'original"""
-    try:
-        from uniqueness_checker import UniquenessChecker
-        checker = UniquenessChecker()
-        result = checker.compare_videos(original_path, variation_path)
-        similarity = result['similarity_percent']
-        uniqueness = 100 - similarity
-        return {'similarity': similarity, 'uniqueness': uniqueness}
-    except:
-        return {'uniqueness': 50}
+def estimate_uniqueness(modifications):
+    """Estime l'unicité à partir des modifications appliquées (instantané, pas de FFmpeg)"""
+    score = 0
+
+    # Miroir horizontal = très efficace contre la détection
+    if modifications.get("hflip", False):
+        score += 30
+
+    # Changement de vitesse
+    speed = modifications.get("speed", 1.0)
+    speed_diff = abs(speed - 1.0)
+    score += min(speed_diff * 500, 20)  # max 20 pts
+
+    # Décalage de teinte
+    hue = abs(modifications.get("hue_shift", 0))
+    score += min(hue * 1.5, 20)  # max 20 pts
+
+    # Crop
+    crop = modifications.get("crop_percent", 0)
+    score += min(crop * 5, 15)  # max 15 pts
+
+    # Saturation
+    sat = abs(modifications.get("saturation", 1.0) - 1.0)
+    score += min(sat * 100, 5)  # max 5 pts
+
+    # Brightness
+    bright = abs(modifications.get("brightness", 0))
+    score += min(bright * 200, 5)  # max 5 pts
+
+    # Metadata randomisée
+    if modifications.get("metadata_randomized", False):
+        score += 10
+
+    # CRF différent = bitstream unique
+    crf = modifications.get("crf", 20)
+    if crf != 20:
+        score += 3
+
+    return {'uniqueness': min(round(score), 100)}
 
 
 def get_dated_folder_name():
@@ -231,8 +265,6 @@ def main():
     <div class="header-bar">
         <span class="header-logo">LTP</span>
         <span class="header-title">TikFusion</span>
-        <span class="header-x">x</span>
-        <span class="header-logo">LTP</span>
     </div>
     """, unsafe_allow_html=True)
 
@@ -294,13 +326,13 @@ def main():
 
                         folder_name = os.path.basename(os.path.dirname(results[0]["output_path"])) if results else ""
 
-                        status.text("🔍 Analyse de l'unicité...")
                         analyses = []
                         for i, r in enumerate(results):
                             if r["success"]:
-                                analysis = compare_to_original(original_path, r["output_path"])
+                                mods = r.get("modifications", {})
+                                analysis = estimate_uniqueness(mods)
                                 analysis['name'] = Path(r["output_path"]).stem
-                                analysis['modifications'] = r.get("modifications", {})
+                                analysis['modifications'] = mods
                                 analysis['output_path'] = r["output_path"]
                                 analyses.append(analysis)
                             progress.progress((i + 1) / len(results))
@@ -396,12 +428,13 @@ def main():
                                 result = uniquify_video_ffmpeg(original_path, output_path, intensity)
 
                                 if result["success"]:
-                                    analysis = compare_to_original(original_path, output_path)
+                                    mods = result.get("modifications", {})
+                                    analysis = estimate_uniqueness(mods)
                                     video_results['variations'].append({
                                         'name': f"V{var_idx + 1:02d}",
                                         'output_path': output_path,
                                         'uniqueness': analysis['uniqueness'],
-                                        'modifications': result.get("modifications", {})
+                                        'modifications': mods
                                     })
                                     video_results['success_count'] += 1
 
