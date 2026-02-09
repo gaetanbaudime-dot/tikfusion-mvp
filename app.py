@@ -132,21 +132,16 @@ st.markdown("""
         margin-top: -48px !important;
         margin-bottom: 0 !important;
         height: 48px !important;
-        display: flex !important;
-        justify-content: center !important;
     }
-    .stCheckbox > div {
-        width: 48px !important;
-        height: 48px !important;
-    }
+    .stCheckbox,
+    .stCheckbox > div,
     .stCheckbox label {
-        width: 48px !important;
+        width: 100% !important;
         height: 48px !important;
         min-height: 0 !important;
         padding: 0 !important;
         cursor: pointer !important;
         opacity: 0 !important;
-        display: block !important;
     }
     .stCheckbox label span[data-testid="stCheckboxLabel"] {
         display: none !important;
