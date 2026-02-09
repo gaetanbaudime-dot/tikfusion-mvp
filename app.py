@@ -630,6 +630,16 @@ def main():
             elif not current_key:
                 st.warning("Entre une clé API.")
 
+        if current_key:
+            with st.expander("🔧 Debug API PostBridge"):
+                if st.button("Voir les champs d'un compte", key="cfg_debug_fields"):
+                    try:
+                        from postbridge import get_account_fields
+                        fields = get_account_fields(current_key)
+                        st.json(fields)
+                    except Exception as e:
+                        st.error(f"Erreur: {e}")
+
         st.markdown("---")
         if os.path.exists(output_dir):
             st.markdown("**📁 Sessions récentes**")
@@ -684,7 +694,7 @@ def main():
                     results_container = st.empty()
 
                     try:
-                        from uniquifier import uniquify_video_ffmpeg, get_dated_folder_name
+                        from uniquifier import uniquify_video_ffmpeg
 
                         folder_name = get_dated_folder_name()
                         dated_dir = os.path.join(output_dir, folder_name)
@@ -898,58 +908,60 @@ def main():
                 if not accounts:
                     st.warning("Aucun compte connecté. Ajoute tes comptes sur post-bridge.com")
                 else:
-                    # === 1. ACCOUNT AVATARS — circles with profile pics ===
+                    # === 1. ACCOUNT SELECTION — unified avatar + checkbox ===
                     def _get_avatar(acc):
                         """Try common API fields for profile picture URL."""
-                        for field in ("profile_picture_url", "avatar_url", "picture", "profile_image_url", "image_url", "avatar"):
-                            url = acc.get(field)
-                            if url and isinstance(url, str) and url.startswith("http"):
-                                return url
+                        for field in ("profile_picture_url", "avatar_url", "picture",
+                                      "profile_image_url", "image_url", "avatar",
+                                      "photo", "thumbnail", "icon_url", "pic"):
+                            val = acc.get(field)
+                            if val and isinstance(val, str) and val.startswith("http"):
+                                return val
+                        # Check nested objects
+                        for nested in ("profile", "user", "account"):
+                            obj = acc.get(nested)
+                            if isinstance(obj, dict):
+                                for field in ("picture", "avatar_url", "image_url", "profile_picture_url"):
+                                    val = obj.get(field)
+                                    if val and isinstance(val, str) and val.startswith("http"):
+                                        return val
                         return None
 
-                    # Build avatar HTML
-                    avatars_html = '<div class="pub-avatars">'
-                    for idx, acc in enumerate(accounts[:12]):
-                        acc_id = acc.get("id", "")
+                    st.markdown('<p style="color:#86868B;font-size:0.85rem;font-weight:500;margin-bottom:4px">Comptes</p>', unsafe_allow_html=True)
+
+                    selected_account_ids = []
+                    n_cols = min(len(accounts), 6)
+                    sel_cols = st.columns(n_cols)
+                    for idx, acc in enumerate(accounts[:6]):
+                        acc_id = acc.get("id")
                         platform = acc.get("platform", "unknown")
                         username = acc.get("username", "compte")
                         icon = PLATFORM_ICONS.get(platform, "📱")
                         avatar_url = _get_avatar(acc)
-
-                        if avatar_url:
-                            circle_content = f'<img src="{avatar_url}" style="width:100%;height:100%;border-radius:50%;object-fit:cover" />'
-                        else:
-                            circle_content = f'<span style="font-size:1.4rem">{icon}</span>'
-
-                        avatars_html += f'''<div class="pub-avatar">
-                            <div class="pub-avatar-circle">{circle_content}</div>
-                            <div class="pub-avatar-platform">{icon}</div>
-                            <div class="pub-avatar-name">@{username[:10]}</div>
-                        </div>'''
-                    avatars_html += '</div>'
-                    st.markdown(avatars_html, unsafe_allow_html=True)
-
-                    # Account selection (checkboxes below avatars)
-                    selected_account_ids = []
-                    sel_cols = st.columns(min(len(accounts), 6))
-                    for idx, acc in enumerate(accounts[:6]):
-                        acc_id = acc.get("id")
-                        username = acc.get("username", "compte")
-                        platform = acc.get("platform", "")
-                        icon = PLATFORM_ICONS.get(platform, "📱")
                         with sel_cols[idx]:
-                            if st.checkbox(f"{icon} {username[:10]}", value=True, key=f"pub_acc_{acc_id}"):
+                            # Avatar circle (HTML with profile pic or icon)
+                            if avatar_url:
+                                circle = f'<img src="{avatar_url}" style="width:44px;height:44px;border-radius:50%;object-fit:cover;display:block;margin:0 auto;border:2px solid #3A3A3C" />'
+                            else:
+                                circle = f'<div style="width:44px;height:44px;border-radius:50%;background:#1C1C1E;border:2px solid #3A3A3C;display:flex;align-items:center;justify-content:center;margin:0 auto;font-size:1.3rem">{icon}</div>'
+                            st.markdown(f'''<div style="text-align:center;margin-bottom:2px">
+                                {circle}
+                                <div style="font-size:0.65rem;color:#86868B;margin-top:2px">@{username[:12]}</div>
+                            </div>''', unsafe_allow_html=True)
+                            # Functional checkbox
+                            if st.checkbox(f"{icon}", value=True, key=f"pub_acc_{acc_id}", label_visibility="collapsed"):
                                 selected_account_ids.append(acc_id)
                     if len(accounts) > 6:
-                        # Select remaining accounts
                         with st.expander(f"+{len(accounts) - 6} autres comptes"):
-                            for acc in accounts[6:]:
+                            extra_cols = st.columns(min(len(accounts) - 6, 6))
+                            for idx, acc in enumerate(accounts[6:12]):
                                 acc_id = acc.get("id")
+                                platform = acc.get("platform", "unknown")
                                 username = acc.get("username", "compte")
-                                platform = acc.get("platform", "")
                                 icon = PLATFORM_ICONS.get(platform, "📱")
-                                if st.checkbox(f"{icon} @{username}", value=True, key=f"pub_acc_{acc_id}"):
-                                    selected_account_ids.append(acc_id)
+                                with extra_cols[idx]:
+                                    if st.checkbox(f"{icon} @{username[:10]}", value=True, key=f"pub_acc_{acc_id}"):
+                                        selected_account_ids.append(acc_id)
 
                     st.markdown("---")
 

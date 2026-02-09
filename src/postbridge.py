@@ -45,12 +45,22 @@ def list_accounts(api_key):
     offset = 0
     while True:
         data = _get("/social-accounts", api_key, {"offset": offset, "limit": 50})
-        accounts.extend(data.get("data", []))
+        items = data.get("data", [])
+        accounts.extend(items)
         meta = data.get("meta", {})
         if not meta.get("next"):
             break
         offset += 50
     return accounts
+
+
+def get_account_fields(api_key):
+    """Debug: retourne les champs du premier compte pour inspection."""
+    data = _get("/social-accounts", api_key, {"offset": 0, "limit": 1})
+    items = data.get("data", [])
+    if items:
+        return items[0]
+    return {}
 
 
 def upload_video(api_key, video_path):
