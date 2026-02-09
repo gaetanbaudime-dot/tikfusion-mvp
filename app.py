@@ -103,6 +103,14 @@ st.markdown("""
         font-weight: 600;
         font-size: 0.85rem;
     }
+    .badge-warning {
+        background: #FF9F0A;
+        color: white;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-weight: 600;
+        font-size: 0.85rem;
+    }
     .badge-danger {
         background: #FF453A;
         color: white;
@@ -306,6 +314,27 @@ def format_modifications(mods):
     return " ".join(tags) if tags else '<span style="color:#48484A">—</span>'
 
 
+def get_uniqueness_badge(score):
+    """Retourne la classe CSS du badge selon le score d'unicité.
+    ≥60% = safe (vert) — passe TikTok + Instagram
+    30-59% = warning (orange) — passe TikTok, risqué Instagram
+    <30% = danger (rouge) — risque sur toutes les plateformes
+    """
+    if score >= 60:
+        return 'badge-safe'
+    elif score >= 30:
+        return 'badge-warning'
+    else:
+        return 'badge-danger'
+
+
+LEGEND_HTML = """<div class="legend">
+🟢 <b>≥ 60%</b> = Safe TikTok + Instagram &nbsp;&nbsp;|&nbsp;&nbsp;
+🟠 <b>30-59%</b> = Safe TikTok, risqué Insta &nbsp;&nbsp;|&nbsp;&nbsp;
+🔴 <b>< 30%</b> = Risque de détection
+</div>"""
+
+
 def main():
     # ============ HEADER WITH LOGO ============
     st.markdown("""
@@ -445,7 +474,13 @@ def main():
 
         preview_score = min(preview_score, 100)
 
-        badge_class = "badge-safe" if preview_score >= 60 else "badge-danger"
+        badge_class = get_uniqueness_badge(preview_score)
+        if preview_score >= 60:
+            status_text = "🟢 Safe — passe TikTok et Instagram sans problème"
+        elif preview_score >= 30:
+            status_text = "🟠 OK pour TikTok — attention sur Instagram, active plus de mods"
+        else:
+            status_text = "🔴 Risque de détection — active plus de modifications"
         st.markdown(f"""
         <div style="background:#1C1C1E;border:1px solid #2C2C2E;border-radius:12px;padding:16px;margin:8px 0">
             <div style="display:flex;align-items:center;justify-content:space-between">
@@ -456,7 +491,7 @@ def main():
                 {"  •  ".join(score_details)}
             </div>
             <div style="margin-top:8px;color:#48484A;font-size:0.75rem">
-                {"🟢 Au-dessus de 60% = suffisamment unique pour TikTok/Instagram" if preview_score >= 60 else "🔴 En dessous de 60% — active plus de modifications pour être safe"}
+                {status_text}
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -548,16 +583,14 @@ def main():
 
                 st.markdown(f"<div class='folder-badge'>📁 outputs/{st.session_state.get('single_folder', '')}/</div>", unsafe_allow_html=True)
 
-                st.markdown("""<div class="legend">
-                🟢 <b>≥ 60%</b> = Suffisamment unique &nbsp;&nbsp;|&nbsp;&nbsp; 🔴 <b>< 60%</b> = Trop similaire à l'original
-                </div>""", unsafe_allow_html=True)
+                st.markdown(LEGEND_HTML, unsafe_allow_html=True)
 
                 for a in analyses:
                     cols = st.columns([1, 3, 1, 2, 1])
                     cols[0].markdown(f"**{a['name']}**")
                     cols[1].markdown(format_modifications(a.get('modifications', {})), unsafe_allow_html=True)
                     u = a['uniqueness']
-                    badge = 'badge-safe' if u >= 60 else 'badge-danger'
+                    badge = get_uniqueness_badge(u)
                     cols[2].markdown(f"<span class='{badge}'>{u:.0f}%</span>", unsafe_allow_html=True)
                     output_path = a.get('output_path', '')
                     if output_path and os.path.exists(output_path):
@@ -667,9 +700,7 @@ def main():
                 col_b.metric("📊 Unicité moy.", f"{avg_uniqueness:.0f}%")
                 col_c.metric("✅ Safe (≥60%)", f"{safe_count}/{len(all_variations)}")
 
-                st.markdown("""<div class="legend">
-                🟢 <b>≥ 60%</b> = Suffisamment unique &nbsp;&nbsp;|&nbsp;&nbsp; 🔴 <b>< 60%</b> = Trop similaire
-                </div>""", unsafe_allow_html=True)
+                st.markdown(LEGEND_HTML, unsafe_allow_html=True)
 
                 for r in results:
                     with st.expander(f"📹 {r['name']} — {r['success_count']} variations"):
@@ -679,7 +710,7 @@ def main():
                                 cols[0].markdown(f"**{v['name']}**")
                                 cols[1].markdown(format_modifications(v.get('modifications', {})), unsafe_allow_html=True)
                                 u = v['uniqueness']
-                                badge = 'badge-safe' if u >= 60 else 'badge-danger'
+                                badge = get_uniqueness_badge(u)
                                 cols[2].markdown(f"<span class='{badge}'>{u:.0f}%</span>", unsafe_allow_html=True)
                                 vpath = v.get('output_path', '')
                                 if vpath and os.path.exists(vpath):
