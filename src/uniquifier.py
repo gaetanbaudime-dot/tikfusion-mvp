@@ -121,16 +121,7 @@ def uniquify_video_ffmpeg(input_path, output_path, intensity="medium", enabled_m
     if mods["crop"] and crop_pct > 0:
         filters.append(f"crop=iw*{1-crop_pct}:ih*{1-crop_pct}")
 
-    # Zoom
-    if mods["zoom"] and zoom > 1.0:
-        filters.append(f"scale=iw*{zoom}:ih*{zoom}:flags=fast_bilinear")
-        filters.append("crop=iw/{0}:ih/{0}".format(zoom))
-
-    # Scale to output resolution
-    filters.append("scale=1080:1920:force_original_aspect_ratio=decrease")
-    filters.append("pad=1080:1920:(ow-iw)/2:(oh-ih)/2")
-
-    # Hue + Saturation (after scale = fewer pixels)
+    # Hue + Saturation (before scale = process original resolution)
     if mods["hue"]:
         filters.append(f"hue=h={hue_shift}:s={saturation}")
 
@@ -144,9 +135,18 @@ def uniquify_video_ffmpeg(input_path, output_path, intensity="medium", enabled_m
     if do_hflip:
         filters.append("hflip")
 
-    # Noise
+    # Noise (before scale = fewer pixels to process)
     if mods["noise"] and noise_strength > 0:
         filters.append(f"noise=alls={int(noise_strength)}:allf=t")
+
+    # Zoom
+    if mods["zoom"] and zoom > 1.0:
+        filters.append(f"scale=iw*{zoom}:ih*{zoom}:flags=fast_bilinear")
+        filters.append("crop=iw/{0}:ih/{0}".format(zoom))
+
+    # Scale to output resolution — keep original if already 9:16
+    filters.append("scale=1080:1920:force_original_aspect_ratio=decrease:flags=fast_bilinear")
+    filters.append("pad=1080:1920:(ow-iw)/2:(oh-ih)/2")
 
     # FPS
     if mods["fps"] and target_fps != 30.0:
@@ -203,16 +203,18 @@ def uniquify_video_ffmpeg(input_path, output_path, intensity="medium", enabled_m
     }
 
     # === BUILD COMMAND ===
-    cmd = ["ffmpeg", "-y", "-i", input_path]
+    cmd = ["ffmpeg", "-y", "-threads", "2", "-i", input_path]
     cmd.extend(["-vf", video_filter])
     if audio_filter:
         cmd.extend(["-af", audio_filter])
 
     cmd.extend([
         "-c:v", "libx264", "-crf", str(crf), "-preset", "ultrafast",
+        "-tune", "fastdecode",
         "-g", str(gop_size), "-bf", str(bf_count),
-        "-c:a", "aac", "-b:a", "128k",
+        "-c:a", "aac", "-b:a", "96k",
         "-movflags", "+faststart",
+        "-threads", "2",
     ])
 
     # Metadata (only if enabled)

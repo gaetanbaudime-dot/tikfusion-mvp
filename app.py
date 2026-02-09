@@ -681,28 +681,35 @@ def main():
 
                     progress = st.progress(0)
                     status = st.empty()
+                    results_container = st.empty()
 
                     try:
-                        from uniquifier import batch_uniquify
+                        from uniquifier import uniquify_video_ffmpeg, get_dated_folder_name
 
-                        status.text("⏳ Génération en cours...")
-                        results = batch_uniquify(original_path, output_dir, num_vars, intensity, enabled_mods)
-
-                        folder_name = os.path.basename(os.path.dirname(results[0]["output_path"])) if results else ""
+                        folder_name = get_dated_folder_name()
+                        dated_dir = os.path.join(output_dir, folder_name)
+                        os.makedirs(dated_dir, exist_ok=True)
 
                         analyses = []
-                        for i, r in enumerate(results):
+                        for i in range(num_vars):
+                            status.text(f"⏳ V{i+1:02d}/{num_vars}...")
+                            out_path = os.path.join(dated_dir, f"V{i+1:02d}.mp4")
+                            r = uniquify_video_ffmpeg(original_path, out_path, intensity, enabled_mods)
+
                             if r["success"]:
                                 mods = r.get("modifications", {})
                                 analysis = estimate_uniqueness(mods)
-                                analysis['name'] = Path(r["output_path"]).stem
+                                analysis['name'] = Path(out_path).stem
                                 analysis['modifications'] = mods
-                                analysis['output_path'] = r["output_path"]
+                                analysis['output_path'] = out_path
                                 analyses.append(analysis)
-                            progress.progress((i + 1) / len(results))
 
-                        st.session_state['single_analyses'] = analyses
-                        st.session_state['single_folder'] = folder_name
+                            progress.progress((i + 1) / num_vars)
+
+                            # Show partial results as they arrive
+                            st.session_state['single_analyses'] = analyses
+                            st.session_state['single_folder'] = folder_name
+
                         status.empty()
                         progress.empty()
                         st.success(f"✅ {len(analyses)} variations générées")
@@ -720,7 +727,7 @@ def main():
                 st.markdown(LEGEND_HTML, unsafe_allow_html=True)
 
                 for a in analyses:
-                    cols = st.columns([1, 3, 1, 2, 1])
+                    cols = st.columns([1, 3, 1, 1])
                     cols[0].markdown(f"**{a['name']}**")
                     cols[1].markdown(format_modifications(a.get('modifications', {})), unsafe_allow_html=True)
                     u = a['uniqueness']
@@ -729,9 +736,15 @@ def main():
                     output_path = a.get('output_path', '')
                     if output_path and os.path.exists(output_path):
                         with open(output_path, "rb") as f:
-                            video_bytes = f.read()
-                        cols[3].video(video_bytes, format="video/mp4")
-                        cols[4].download_button("⬇️", video_bytes, file_name=Path(output_path).name, mime="video/mp4", key=f"dl_{a['name']}")
+                            cols[3].download_button("⬇️", f.read(), file_name=Path(output_path).name, mime="video/mp4", key=f"dl_{a['name']}")
+
+                # Video previews in a separate expandable section
+                with st.expander("▶️ Previews vidéo", expanded=False):
+                    for a in analyses:
+                        output_path = a.get('output_path', '')
+                        if output_path and os.path.exists(output_path):
+                            st.caption(a['name'])
+                            st.video(output_path, format="video/mp4")
 
     # ========== TAB 2: BULK UPLOAD ==========
     with tab2:
@@ -840,7 +853,7 @@ def main():
                     with st.expander(f"📹 {r['name']} — {r['success_count']} variations"):
                         if r['variations']:
                             for v in r['variations']:
-                                cols = st.columns([1, 3, 1, 2, 1])
+                                cols = st.columns([1, 3, 1, 1])
                                 cols[0].markdown(f"**{v['name']}**")
                                 cols[1].markdown(format_modifications(v.get('modifications', {})), unsafe_allow_html=True)
                                 u = v['uniqueness']
@@ -849,9 +862,14 @@ def main():
                                 vpath = v.get('output_path', '')
                                 if vpath and os.path.exists(vpath):
                                     with open(vpath, "rb") as f:
-                                        vbytes = f.read()
-                                    cols[3].video(vbytes, format="video/mp4")
-                                    cols[4].download_button("⬇️", vbytes, file_name=f"{r['name']}_{v['name']}.mp4", mime="video/mp4", key=f"dl_bulk_{r['name']}_{v['name']}")
+                                        cols[3].download_button("⬇️", f.read(), file_name=f"{r['name']}_{v['name']}.mp4", mime="video/mp4", key=f"dl_bulk_{r['name']}_{v['name']}")
+
+                            with st.expander("▶️ Previews", expanded=False):
+                                for v in r['variations']:
+                                    vpath = v.get('output_path', '')
+                                    if vpath and os.path.exists(vpath):
+                                        st.caption(v['name'])
+                                        st.video(vpath, format="video/mp4")
             else:
                 st.info("👈 Upload plusieurs vidéos et lance le traitement")
 
