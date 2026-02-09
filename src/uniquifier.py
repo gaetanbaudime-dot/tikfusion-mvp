@@ -4,6 +4,7 @@ Video Uniquifier - Anti-detection video modifications
 import subprocess
 import os
 import random
+import string
 from pathlib import Path
 from datetime import datetime
 import locale
@@ -43,28 +44,56 @@ def uniquify_video_ffmpeg(input_path, output_path, intensity="medium"):
         filters.append("scale=1080:1920:force_original_aspect_ratio=decrease")
         filters.append("pad=1080:1920:(ow-iw)/2:(oh-ih)/2")
     
-    if random.random() < 0.2:
+    do_hflip = random.random() < 0.2
+    if do_hflip:
         filters.append("hflip")
-    
+
     video_filter = ",".join(filters)
     audio_filter = f"atempo={speed}" if 0.5 <= speed <= 2.0 else ""
-    
+
+    crf = random.randint(18, 23)
+
+    # Randomiser les métadonnées pour renforcer l'unicité
+    random_title = ''.join(random.choices(string.ascii_letters + string.digits, k=12))
+    random_comment = ''.join(random.choices(string.ascii_letters + string.digits, k=16))
+
+    # Tracer toutes les modifications appliquées
+    modifications = {
+        "speed": round(speed, 3),
+        "hue_shift": hue_shift,
+        "saturation": round(saturation, 2),
+        "brightness": round(brightness, 3),
+        "crop_percent": round(crop_pct * 100, 1),
+        "hflip": do_hflip,
+        "crf": crf,
+        "metadata_randomized": True
+    }
+
     cmd = ["ffmpeg", "-y", "-i", input_path, "-vf", video_filter]
-    
+
     if audio_filter:
         cmd.extend(["-af", audio_filter])
-    
-    crf = random.randint(18, 23)
-    cmd.extend(["-c:v", "libx264", "-crf", str(crf), "-preset", "fast", "-c:a", "aac", "-b:a", "128k", output_path])
-    
+
+    cmd.extend(["-c:v", "libx264", "-crf", str(crf), "-preset", "fast", "-c:a", "aac", "-b:a", "128k"])
+
+    # Métadonnées aléatoires
+    cmd.extend([
+        "-metadata", f"title={random_title}",
+        "-metadata", f"comment={random_comment}",
+        "-metadata", "encoder=libx264",
+        "-metadata", f"creation_time={datetime.now().isoformat()}",
+    ])
+
+    cmd.append(output_path)
+
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if result.returncode == 0:
-            return {"success": True, "output_path": output_path}
+            return {"success": True, "output_path": output_path, "modifications": modifications}
         else:
-            return {"success": False, "error": result.stderr}
+            return {"success": False, "error": result.stderr, "modifications": modifications}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": str(e), "modifications": modifications}
 
 def get_dated_folder_name():
     """Génère un nom de dossier avec date et heure en français"""

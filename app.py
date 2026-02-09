@@ -49,6 +49,24 @@ def get_dated_folder_name():
                7: "juillet", 8: "aout", 9: "septembre", 10: "octobre", 11: "novembre", 12: "decembre"}
     return f"{now.day} {mois_fr[now.month]} {now.strftime('%Hh%M')}"
 
+def format_modifications(mods):
+    """Formate les modifications en tags visuels compacts"""
+    tags = []
+    if mods.get("hflip"):
+        tags.append('<span style="background:#f44336;color:white;padding:2px 6px;border-radius:3px;font-size:0.8em">🪞 Miroir</span>')
+    speed = mods.get("speed", 1.0)
+    if abs(speed - 1.0) > 0.005:
+        tags.append(f'<span style="background:#333;color:#00f2ea;padding:2px 6px;border-radius:3px;font-size:0.8em">🔄 x{speed:.2f}</span>')
+    hue = mods.get("hue_shift", 0)
+    if abs(hue) > 0:
+        tags.append(f'<span style="background:#333;color:#ff9800;padding:2px 6px;border-radius:3px;font-size:0.8em">🎨 {hue:+d}°</span>')
+    crop = mods.get("crop_percent", 0)
+    if crop > 0.1:
+        tags.append(f'<span style="background:#333;color:#8bc34a;padding:2px 6px;border-radius:3px;font-size:0.8em">✂️ {crop:.1f}%</span>')
+    if mods.get("metadata_randomized"):
+        tags.append('<span style="background:#333;color:#9c27b0;padding:2px 6px;border-radius:3px;font-size:0.8em">🏷️ Metadata</span>')
+    return " ".join(tags) if tags else '<span style="color:#666;font-size:0.8em">Aucune modification majeure</span>'
+
 def main():
     st.markdown('<p class="main-header">🎬 TikFusion MVP</p>', unsafe_allow_html=True)
 
@@ -103,6 +121,7 @@ def main():
                             if r["success"]:
                                 analysis = compare_to_original(original_path, r["output_path"])
                                 analysis['name'] = Path(r["output_path"]).stem
+                                analysis['modifications'] = r.get("modifications", {})
                                 analyses.append(analysis)
                             progress.progress((i + 1) / len(results))
                         
@@ -134,15 +153,8 @@ def main():
                 analyses = st.session_state['single_analyses']
                 st.markdown(f"**📁 outputs/{st.session_state.get('single_folder', '')}/")
                 
-                cols = st.columns([2, 2, 1, 1, 1])
-                cols[0].markdown("**Fichier**")
-                cols[1].markdown("**Unicité**")
-                cols[2].markdown("**TT**")
-                cols[3].markdown("**IG**")
-                cols[4].markdown("**YT**")
-                
                 for a in analyses:
-                    cols = st.columns([2, 2, 1, 1, 1])
+                    cols = st.columns([2, 1, 1, 1, 1])
                     cols[0].text(a['name'])
                     u = a['uniqueness']
                     color = 'safe' if u >= 30 else 'warning' if u >= 20 else 'danger'
@@ -150,6 +162,8 @@ def main():
                     cols[2].markdown("✅" if a['safe_tiktok'] else "❌")
                     cols[3].markdown("✅" if a['safe_instagram'] else "❌")
                     cols[4].markdown("✅" if a['safe_youtube'] else "❌")
+                    st.markdown(format_modifications(a.get('modifications', {})), unsafe_allow_html=True)
+                    st.markdown("<hr style='margin:2px 0;border-color:#333'>", unsafe_allow_html=True)
 
     # ========== TAB 2: BULK UPLOAD ==========
     with tab2:
@@ -229,7 +243,8 @@ def main():
                                         'uniqueness': analysis['uniqueness'],
                                         'safe_tiktok': analysis['safe_tiktok'],
                                         'safe_instagram': analysis['safe_instagram'],
-                                        'safe_youtube': analysis['safe_youtube']
+                                        'safe_youtube': analysis['safe_youtube'],
+                                        'modifications': result.get("modifications", {})
                                     })
                                     video_results['success_count'] += 1
                             
@@ -300,7 +315,7 @@ def main():
                             cols[4].markdown("**YT**")
                             
                             for v in r['variations']:
-                                cols = st.columns([2, 2, 1, 1, 1])
+                                cols = st.columns([2, 1, 1, 1, 1])
                                 cols[0].text(v['name'])
                                 u = v['uniqueness']
                                 color = 'safe' if u >= 30 else 'warning' if u >= 20 else 'danger'
@@ -308,6 +323,8 @@ def main():
                                 cols[2].markdown("✅" if v['safe_tiktok'] else "❌")
                                 cols[3].markdown("✅" if v['safe_instagram'] else "❌")
                                 cols[4].markdown("✅" if v['safe_youtube'] else "❌")
+                                st.markdown(format_modifications(v.get('modifications', {})), unsafe_allow_html=True)
+                                st.markdown("<hr style='margin:2px 0;border-color:#333'>", unsafe_allow_html=True)
             else:
                 st.info("👈 Upload plusieurs vidéos et lance le bulk processing")
                 
