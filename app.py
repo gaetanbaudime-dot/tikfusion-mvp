@@ -127,6 +127,18 @@ st.markdown("""
     .tag-pitch { background: #2C2C2E; color: #5E5CE6; border: 1px solid #3A3A3C; }
     .tag-meta { background: #2C2C2E; color: #BF5AF2; border: 1px solid #3A3A3C; }
 
+    /* Publish — compact checkboxes under avatars */
+    .stCheckbox {
+        margin-top: -10px !important;
+    }
+    .stCheckbox label {
+        min-height: 0 !important;
+        padding: 0 !important;
+    }
+    .stCheckbox label span[data-testid="stCheckboxLabel"] {
+        display: none !important;
+    }
+
     /* Publish — PostBridge-exact */
     .pb-acc {
         position: relative;
