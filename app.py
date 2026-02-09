@@ -127,18 +127,22 @@ st.markdown("""
     .tag-pitch { background: #2C2C2E; color: #5E5CE6; border: 1px solid #3A3A3C; }
     .tag-meta { background: #2C2C2E; color: #BF5AF2; border: 1px solid #3A3A3C; }
 
-    /* Publish — hide checkboxes, show only tiny dot */
+    /* Publish — invisible checkbox overlaid on avatar */
     .stCheckbox {
-        margin-top: -4px !important;
-        margin-bottom: -12px !important;
+        margin-top: -52px !important;
+        margin-bottom: 0 !important;
+        height: 48px !important;
+        overflow: hidden !important;
     }
     .stCheckbox label {
+        width: 48px !important;
+        height: 48px !important;
         min-height: 0 !important;
-        padding: 2px 0 !important;
-        justify-content: center !important;
-    }
-    .stCheckbox label > span:first-child {
-        transform: scale(0.65);
+        padding: 0 !important;
+        cursor: pointer !important;
+        opacity: 0 !important;
+        display: block !important;
+        margin: 0 auto !important;
     }
     .stCheckbox label span[data-testid="stCheckboxLabel"] {
         display: none !important;
@@ -1006,10 +1010,12 @@ def main():
                             opa = "1" if is_sel else "0.5"
                             gs = "0%" if is_sel else "100%"
                             with acc_cols[idx]:
-                                st.markdown(f'''<div class="pb-acc {'selected' if is_sel else ''}" title="{username}" style="margin:0 auto">
-                                    <div class="pb-acc-platform">{icon}</div>
-                                    <div class="pb-acc-circle" style="border-color:{border_c};opacity:{opa};filter:grayscale({gs})">
-                                        <span style="font-size:1.1rem">{icon}</span>
+                                st.markdown(f'''<div class="pb-acc-wrap" style="position:relative;width:48px;margin:0 auto">
+                                    <div class="pb-acc {'selected' if is_sel else ''}" title="{username}">
+                                        <div class="pb-acc-platform">{icon}</div>
+                                        <div class="pb-acc-circle" style="border-color:{border_c};opacity:{opa};filter:grayscale({gs})">
+                                            <span style="font-size:1.1rem">{icon}</span>
+                                        </div>
                                     </div>
                                 </div>''', unsafe_allow_html=True)
                                 if st.checkbox("x", value=is_sel, key=sel_key, label_visibility="collapsed"):
