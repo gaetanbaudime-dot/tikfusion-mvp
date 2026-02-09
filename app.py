@@ -127,58 +127,116 @@ st.markdown("""
     .tag-pitch { background: #2C2C2E; color: #5E5CE6; border: 1px solid #3A3A3C; }
     .tag-meta { background: #2C2C2E; color: #BF5AF2; border: 1px solid #3A3A3C; }
 
-    /* Publish — account avatars */
-    .pub-avatars {
+    /* Publish — PostBridge-style account avatars */
+    .pb-accounts-row {
         display: flex;
         flex-wrap: wrap;
-        gap: 12px;
-        padding: 12px 0;
+        gap: 8px;
+        padding: 8px 0 16px 0;
+        align-items: flex-start;
     }
-    .pub-avatar {
+    .pb-acc {
         position: relative;
-        width: 56px;
+        width: 52px;
         text-align: center;
         cursor: pointer;
+        transition: opacity 0.15s;
     }
-    .pub-avatar-circle {
-        width: 48px;
-        height: 48px;
+    .pb-acc-circle {
+        width: 46px;
+        height: 46px;
         border-radius: 50%;
-        border: 2px solid #3A3A3C;
+        border: 2.5px solid transparent;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 1.3rem;
-        background: #1C1C1E;
+        font-size: 1.2rem;
+        background: #2C2C2E;
         margin: 0 auto;
-        transition: border-color 0.2s, box-shadow 0.2s;
-    }
-    .pub-avatar-circle.selected {
-        border-color: #007AFF;
-        box-shadow: 0 0 0 2px #007AFF44;
-    }
-    .pub-avatar-name {
-        font-size: 0.6rem;
-        color: #86868B;
-        margin-top: 4px;
+        transition: all 0.2s ease;
         overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        max-width: 56px;
+        filter: grayscale(100%) brightness(0.7);
     }
-    .pub-avatar-platform {
+    .pb-acc.selected .pb-acc-circle {
+        border-color: #007AFF;
+        filter: grayscale(0%) brightness(1);
+        box-shadow: 0 0 0 2px #007AFF55;
+    }
+    .pb-acc-platform {
         position: absolute;
-        bottom: 18px;
-        right: 0;
-        font-size: 0.65rem;
-        background: #1C1C1E;
+        bottom: 2px;
+        right: -2px;
+        width: 20px;
+        height: 20px;
         border-radius: 50%;
-        width: 18px;
-        height: 18px;
+        background: #1C1C1E;
+        border: 1.5px solid #2C2C2E;
         display: flex;
         align-items: center;
         justify-content: center;
+        font-size: 0.6rem;
+    }
+    .pb-section-title {
+        font-size: 0.85rem;
+        font-weight: 500;
+        color: #86868B;
+        margin: 0 0 4px 0;
+    }
+    .pb-page-title {
+        font-size: 1.4rem;
+        font-weight: 700;
+        color: #F5F5F7;
+        margin: 0 0 16px 0;
+    }
+    .pb-remember-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 14px;
+        border-radius: 8px;
+        background: #2C2C2E;
+        border: 1px solid #3A3A3C;
+        color: #86868B;
+        font-size: 0.8rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    .pb-remember-btn.active {
+        background: #007AFF22;
+        border-color: #007AFF;
+        color: #007AFF;
+    }
+    .pb-media-zone {
+        border: 2px dashed #3A3A3C;
+        border-radius: 12px;
+        padding: 20px;
+        min-height: 100px;
+        background: #1C1C1E;
+        transition: border-color 0.2s;
+    }
+    .pb-media-zone:hover {
+        border-color: #48484A;
+    }
+    .pb-media-preview-box {
+        background: #1C1C1E;
         border: 1px solid #2C2C2E;
+        border-radius: 12px;
+        padding: 12px;
+        text-align: center;
+    }
+    .pb-config-section {
+        background: #1C1C1E;
+        border: 1px solid #2C2C2E;
+        border-radius: 10px;
+        padding: 12px 16px;
+        margin: 8px 0;
+    }
+    .pb-caption-counter {
+        text-align: right;
+        color: #48484A;
+        font-size: 0.75rem;
+        margin-top: -6px;
     }
 
     /* Publish — status badges */
@@ -883,7 +941,7 @@ def main():
             else:
                 st.info("👈 Upload plusieurs vidéos et lance le traitement")
 
-    # ========== TAB 5: PUBLISH ==========
+    # ========== TAB 5: PUBLISH (PostBridge-style) ==========
     with tab5:
         api_key = _get_api_key()
 
@@ -899,8 +957,8 @@ def main():
             try:
                 from postbridge import list_accounts, upload_video, create_post, get_post_results, PLATFORM_ICONS
 
-                if 'pb_accounts' not in st.session_state or st.button("🔄", key="pb_refresh", help="Rafraîchir les comptes"):
-                    with st.spinner("Chargement..."):
+                if 'pb_accounts' not in st.session_state:
+                    with st.spinner("Chargement des comptes..."):
                         st.session_state['pb_accounts'] = list_accounts(api_key)
 
                 accounts = st.session_state.get('pb_accounts', [])
@@ -908,70 +966,139 @@ def main():
                 if not accounts:
                     st.warning("Aucun compte connecté. Ajoute tes comptes sur post-bridge.com")
                 else:
-                    # === 1. ACCOUNT SELECTION — unified avatar + checkbox ===
-                    def _get_avatar(acc):
-                        """Try common API fields for profile picture URL."""
-                        for field in ("profile_picture_url", "avatar_url", "picture",
-                                      "profile_image_url", "image_url", "avatar",
-                                      "photo", "thumbnail", "icon_url", "pic"):
-                            val = acc.get(field)
-                            if val and isinstance(val, str) and val.startswith("http"):
-                                return val
-                        # Check nested objects
-                        for nested in ("profile", "user", "account"):
-                            obj = acc.get(nested)
-                            if isinstance(obj, dict):
-                                for field in ("picture", "avatar_url", "image_url", "profile_picture_url"):
-                                    val = obj.get(field)
-                                    if val and isinstance(val, str) and val.startswith("http"):
-                                        return val
-                        return None
-
-                    st.markdown('<p style="color:#86868B;font-size:0.85rem;font-weight:500;margin-bottom:4px">Comptes</p>', unsafe_allow_html=True)
-
-                    selected_account_ids = []
-                    n_cols = min(len(accounts), 6)
-                    sel_cols = st.columns(n_cols)
-                    for idx, acc in enumerate(accounts[:6]):
-                        acc_id = acc.get("id")
-                        platform = acc.get("platform", "unknown")
-                        username = acc.get("username", "compte")
-                        icon = PLATFORM_ICONS.get(platform, "📱")
-                        avatar_url = _get_avatar(acc)
-                        with sel_cols[idx]:
-                            # Avatar circle (HTML with profile pic or icon)
-                            if avatar_url:
-                                circle = f'<img src="{avatar_url}" style="width:44px;height:44px;border-radius:50%;object-fit:cover;display:block;margin:0 auto;border:2px solid #3A3A3C" />'
+                    # ── PAGE HEADER ──
+                    header_cols = st.columns([4, 1, 1])
+                    with header_cols[0]:
+                        st.markdown('<p class="pb-page-title">Create video post</p>', unsafe_allow_html=True)
+                    with header_cols[1]:
+                        if st.button("🔄 Refresh", key="pb_refresh", use_container_width=True):
+                            with st.spinner("..."):
+                                st.session_state['pb_accounts'] = list_accounts(api_key)
+                                st.rerun()
+                    with header_cols[2]:
+                        # ── REMEMBER BUTTON ──
+                        remember_active = st.session_state.get('pb_remember', False)
+                        if st.button(
+                            f"{'🟢' if remember_active else '⚪'} Remember",
+                            key="pb_remember_btn",
+                            use_container_width=True,
+                        ):
+                            if not remember_active:
+                                # Save current selection
+                                current_sel = []
+                                for acc in accounts:
+                                    acc_id = acc.get("id")
+                                    if st.session_state.get(f"pub_sel_{acc_id}", False):
+                                        current_sel.append(acc_id)
+                                st.session_state['pb_remembered_ids'] = current_sel
+                                st.session_state['pb_remember'] = True
                             else:
-                                circle = f'<div style="width:44px;height:44px;border-radius:50%;background:#1C1C1E;border:2px solid #3A3A3C;display:flex;align-items:center;justify-content:center;margin:0 auto;font-size:1.3rem">{icon}</div>'
-                            st.markdown(f'''<div style="text-align:center;margin-bottom:2px">
-                                {circle}
-                                <div style="font-size:0.65rem;color:#86868B;margin-top:2px">@{username[:12]}</div>
-                            </div>''', unsafe_allow_html=True)
-                            # Functional checkbox
-                            if st.checkbox(f"{icon}", value=True, key=f"pub_acc_{acc_id}", label_visibility="collapsed"):
-                                selected_account_ids.append(acc_id)
-                    if len(accounts) > 6:
-                        with st.expander(f"+{len(accounts) - 6} autres comptes"):
-                            extra_cols = st.columns(min(len(accounts) - 6, 6))
-                            for idx, acc in enumerate(accounts[6:12]):
-                                acc_id = acc.get("id")
-                                platform = acc.get("platform", "unknown")
-                                username = acc.get("username", "compte")
-                                icon = PLATFORM_ICONS.get(platform, "📱")
-                                with extra_cols[idx]:
-                                    if st.checkbox(f"{icon} @{username[:10]}", value=True, key=f"pub_acc_{acc_id}"):
-                                        selected_account_ids.append(acc_id)
+                                st.session_state['pb_remember'] = False
+                                st.session_state.pop('pb_remembered_ids', None)
+                            st.rerun()
+
+                    # ── PLATFORM FILTER ──
+                    all_platforms = sorted(set(a.get("platform", "unknown") for a in accounts))
+                    if len(all_platforms) > 1:
+                        platform_options = ["All"] + all_platforms
+                        selected_platform = st.radio(
+                            "Filter",
+                            platform_options,
+                            key="pub_platform_filter",
+                            horizontal=True,
+                            label_visibility="collapsed",
+                        )
+                    else:
+                        selected_platform = "All"
+
+                    filtered_accounts = accounts if selected_platform == "All" else [
+                        a for a in accounts if a.get("platform") == selected_platform
+                    ]
+
+                    # ── ACCOUNT AVATARS (PostBridge-style toggles) ──
+                    # Initialize remembered selection on first load
+                    remembered_ids = st.session_state.get('pb_remembered_ids', [])
+                    for acc in filtered_accounts:
+                        acc_id = acc.get("id")
+                        key = f"pub_sel_{acc_id}"
+                        if key not in st.session_state:
+                            st.session_state[key] = acc_id in remembered_ids if remembered_ids else False
+
+                    # Build avatar row as HTML + hidden toggles
+                    PLATFORM_SVGS = {
+                        "instagram": "📸",
+                        "tiktok": "🎵",
+                        "youtube": "▶️",
+                        "facebook": "📘",
+                        "twitter": "🐦",
+                        "threads": "🧵",
+                    }
+
+                    # Use Streamlit columns for clickable account selection
+                    max_per_row = min(len(filtered_accounts), 8)
+                    if max_per_row > 0:
+                        acc_cols = st.columns(max_per_row)
+                        selected_account_ids = []
+                        for idx, acc in enumerate(filtered_accounts[:max_per_row]):
+                            acc_id = acc.get("id")
+                            platform = acc.get("platform", "unknown")
+                            username = acc.get("username", "compte")
+                            icon = PLATFORM_SVGS.get(platform, PLATFORM_ICONS.get(platform, "📱"))
+                            sel_key = f"pub_sel_{acc_id}"
+                            is_selected = st.session_state.get(sel_key, False)
+
+                            with acc_cols[idx]:
+                                # Clickable avatar rendered via toggle
+                                border_color = "#007AFF" if is_selected else "#3A3A3C"
+                                filter_css = "grayscale(0%) brightness(1)" if is_selected else "grayscale(100%) brightness(0.6)"
+                                shadow = "0 0 0 2px #007AFF55" if is_selected else "none"
+                                st.markdown(f'''<div style="text-align:center;padding:4px 0">
+                                    <div style="width:46px;height:46px;border-radius:50%;background:#2C2C2E;
+                                        border:2.5px solid {border_color};display:flex;align-items:center;
+                                        justify-content:center;margin:0 auto;font-size:1.3rem;
+                                        filter:{filter_css};box-shadow:{shadow};transition:all 0.2s">
+                                        {icon}
+                                    </div>
+                                    <div style="position:relative;margin-top:-10px;text-align:right;width:46px;margin-left:auto;margin-right:auto">
+                                        <span style="font-size:0.55rem;background:#1C1C1E;border-radius:50%;padding:1px 3px;
+                                            border:1px solid #2C2C2E">{icon}</span>
+                                    </div>
+                                    <div style="font-size:0.6rem;color:{'#F5F5F7' if is_selected else '#48484A'};
+                                        margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+                                        max-width:64px;margin-left:auto;margin-right:auto">
+                                        @{username[:12]}
+                                    </div>
+                                </div>''', unsafe_allow_html=True)
+                                # Functional toggle (small, below avatar)
+                                toggled = st.toggle("sel", value=is_selected, key=sel_key, label_visibility="collapsed")
+                                if toggled:
+                                    selected_account_ids.append(acc_id)
+
+                        # Extra accounts beyond 8
+                        if len(filtered_accounts) > max_per_row:
+                            with st.expander(f"+{len(filtered_accounts) - max_per_row} autres comptes"):
+                                extra_cols = st.columns(min(len(filtered_accounts) - max_per_row, 8))
+                                for idx, acc in enumerate(filtered_accounts[max_per_row:max_per_row + 8]):
+                                    acc_id = acc.get("id")
+                                    platform = acc.get("platform", "unknown")
+                                    username = acc.get("username", "compte")
+                                    icon = PLATFORM_SVGS.get(platform, PLATFORM_ICONS.get(platform, "📱"))
+                                    sel_key = f"pub_sel_{acc_id}"
+                                    with extra_cols[idx]:
+                                        if st.toggle(f"{icon} @{username[:10]}", value=st.session_state.get(sel_key, False), key=sel_key):
+                                            selected_account_ids.append(acc_id)
+                    else:
+                        selected_account_ids = []
+                        st.info("Aucun compte pour cette plateforme.")
 
                     st.markdown("---")
 
-                    # === 2. TWO-COLUMN LAYOUT like PostBridge ===
+                    # ── TWO-COLUMN LAYOUT ──
                     col_left, col_right = st.columns([2, 1])
-
                     selected_video_path = None
 
                     with col_left:
-                        # --- VIDEO SOURCE (small) ---
+                        # ── MEDIA UPLOAD ZONE ──
                         video_source = st.radio(
                             "Source",
                             ["📁 Variations", "📤 Upload"],
@@ -982,24 +1109,33 @@ def main():
 
                         if video_source == "📁 Variations":
                             if os.path.exists(output_dir):
-                                all_mp4 = sorted(Path(output_dir).rglob("*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
+                                all_mp4 = sorted(
+                                    Path(output_dir).rglob("*.mp4"),
+                                    key=lambda p: p.stat().st_mtime, reverse=True
+                                )
                                 if all_mp4:
                                     video_options = {f"{p.parent.name}/{p.name}": str(p) for p in all_mp4[:50]}
-                                    selected_label = st.selectbox("Vidéo", list(video_options.keys()), key="pub_video_select", label_visibility="collapsed")
+                                    selected_label = st.selectbox(
+                                        "Vidéo", list(video_options.keys()),
+                                        key="pub_video_select", label_visibility="collapsed"
+                                    )
                                     selected_video_path = video_options.get(selected_label)
                                 else:
                                     st.info("Aucune variation. Génère d'abord des vidéos.")
                             else:
                                 st.info("Aucune variation trouvée.")
                         else:
-                            uploaded_pub = st.file_uploader("Upload", type=['mp4', 'mov'], key="pub_upload", label_visibility="collapsed")
+                            uploaded_pub = st.file_uploader(
+                                "Upload", type=['mp4', 'mov'],
+                                key="pub_upload", label_visibility="collapsed"
+                            )
                             if uploaded_pub:
                                 with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp:
                                     tmp.write(uploaded_pub.read())
                                     selected_video_path = tmp.name
 
-                        # --- MAIN CAPTION ---
-                        st.markdown('<p style="color:#86868B;font-size:0.85rem;font-weight:500;margin:16px 0 4px 0">Main Caption</p>', unsafe_allow_html=True)
+                        # ── MAIN CAPTION ──
+                        st.markdown('<p class="pb-section-title" style="margin-top:16px">Main Caption</p>', unsafe_allow_html=True)
                         default_caption = st.text_area(
                             "Main Caption",
                             key="pub_default_caption",
@@ -1008,51 +1144,101 @@ def main():
                             label_visibility="collapsed"
                         )
                         char_count = len(default_caption)
-                        st.markdown(f'<p style="text-align:right;color:#48484A;font-size:0.75rem;margin-top:-8px">{char_count}/2200</p>', unsafe_allow_html=True)
+                        st.markdown(f'<p class="pb-caption-counter">{char_count}/2200</p>', unsafe_allow_html=True)
+
+                        # ── PLATFORM CONFIGURATIONS ──
+                        st.markdown('<p class="pb-section-title" style="margin-top:16px">Post configurations & tools</p>', unsafe_allow_html=True)
+
+                        # TikTok Config
+                        with st.expander("🎵 TikTok Configuration"):
+                            tt_draft = st.checkbox("Send to Draft as TikTok", key="pub_tt_draft", value=False)
+                            tt_ai_content = st.checkbox("Mark as AI-generated content", key="pub_tt_ai", value=False)
+                            tt_comment_off = st.checkbox("Disable comments", key="pub_tt_nocomment", value=False)
+                            tt_duet_off = st.checkbox("Disable duet", key="pub_tt_noduet", value=False)
+                            tt_stitch_off = st.checkbox("Disable stitch", key="pub_tt_nostitch", value=False)
+
+                        # Instagram Config
+                        with st.expander("📸 Instagram Configuration"):
+                            ig_reel = st.checkbox("Post as Reel", key="pub_ig_reel", value=True)
+                            ig_trial = st.checkbox("Trial Reel (Reel d'essai)", key="pub_ig_trial", value=False)
+                            ig_share_feed = st.checkbox("Share to Feed", key="pub_ig_feed", value=True)
+                            ig_comment_off = st.checkbox("Disable comments", key="pub_ig_nocomment", value=False)
 
                     with col_right:
-                        # --- MEDIA PREVIEW (like PostBridge right panel) ---
-                        st.markdown('<p style="color:#86868B;font-size:0.85rem;font-weight:500">Media Preview</p>', unsafe_allow_html=True)
+                        # ── MEDIA PREVIEW ──
+                        st.markdown('<div class="pb-media-preview-box">', unsafe_allow_html=True)
+                        st.markdown('<p class="pb-section-title">Media Preview</p>', unsafe_allow_html=True)
                         if selected_video_path and os.path.exists(selected_video_path):
                             st.video(selected_video_path, format="video/mp4")
                             st.caption(Path(selected_video_path).name)
-                        elif video_source == "📤 Upload" and uploaded_pub:
-                            st.video(uploaded_pub)
                         else:
-                            st.markdown("""<div style="background:#1C1C1E;border:1px dashed #3A3A3C;border-radius:12px;
-                                padding:40px;text-align:center;color:#48484A;font-size:0.85rem">
-                                Sélectionne une vidéo
+                            st.markdown("""<div style="padding:40px 0;text-align:center;color:#48484A;font-size:0.85rem">
+                                Select a video
                             </div>""", unsafe_allow_html=True)
-
-                        st.markdown("---")
-
-                        # --- SCHEDULE TOGGLE ---
-                        schedule_on = st.toggle("Schedule post", key="pub_schedule_toggle")
-                        scheduled_at = None
-                        if schedule_on:
-                            pub_date = st.date_input("Date", key="pub_date")
-                            pub_time = st.time_input("Heure", key="pub_time")
-                            scheduled_at = f"{pub_date}T{pub_time}:00Z"
+                        st.markdown('</div>', unsafe_allow_html=True)
 
                         st.markdown("")
 
-                        # --- POST BUTTON ---
-                        can_publish = selected_video_path and selected_account_ids
-                        btn_label = "📅 Programmer" if schedule_on else "🚀 Post now"
+                        # ── SCHEDULE POST ──
+                        st.markdown('<div class="pb-config-section">', unsafe_allow_html=True)
+                        schedule_on = st.toggle("Schedule post", key="pub_schedule_toggle")
+                        scheduled_at = None
+                        if schedule_on:
+                            sched_cols = st.columns(2)
+                            with sched_cols[0]:
+                                pub_date = st.date_input("Date", key="pub_date")
+                            with sched_cols[1]:
+                                pub_time = st.time_input("Heure", key="pub_time")
+                            scheduled_at = f"{pub_date}T{pub_time}:00Z"
+                        st.markdown('</div>', unsafe_allow_html=True)
 
-                        if st.button(btn_label, type="primary", key="pub_go", use_container_width=True, disabled=not can_publish):
+                        st.markdown("")
+
+                        # ── ACTION BUTTONS ──
+                        can_publish = selected_video_path and selected_account_ids
+                        btn_label = "📅 Schedule" if schedule_on else "🚀 Post now"
+
+                        if st.button(btn_label, type="primary", key="pub_go",
+                                     use_container_width=True, disabled=not can_publish):
                             if not default_caption.strip():
-                                st.error("Ajoute une description.")
+                                st.error("Add a caption first.")
                             else:
-                                with st.spinner("Upload de la vidéo..."):
+                                # Build platform configs
+                                platform_configs = {}
+                                # TikTok
+                                tt_config = {}
+                                if tt_draft:
+                                    tt_config["send_to_draft"] = True
+                                if tt_ai_content:
+                                    tt_config["ai_generated"] = True
+                                if tt_comment_off:
+                                    tt_config["disable_comment"] = True
+                                if tt_duet_off:
+                                    tt_config["disable_duet"] = True
+                                if tt_stitch_off:
+                                    tt_config["disable_stitch"] = True
+                                if tt_config:
+                                    platform_configs["tiktok"] = tt_config
+                                # Instagram
+                                ig_config = {}
+                                if ig_trial:
+                                    ig_config["trial_reel"] = True
+                                if not ig_share_feed:
+                                    ig_config["share_to_feed"] = False
+                                if ig_comment_off:
+                                    ig_config["disable_comments"] = True
+                                if ig_config:
+                                    platform_configs["instagram"] = ig_config
+
+                                with st.spinner("Uploading video..."):
                                     try:
                                         media_id = upload_video(api_key, selected_video_path)
                                     except Exception as e:
-                                        st.error(f"Erreur upload: {e}")
+                                        st.error(f"Upload error: {e}")
                                         media_id = None
 
                                 if media_id:
-                                    with st.spinner("Publication..."):
+                                    with st.spinner("Publishing..."):
                                         try:
                                             result = create_post(
                                                 api_key=api_key,
@@ -1060,30 +1246,36 @@ def main():
                                                 media_ids=[media_id],
                                                 account_ids=selected_account_ids,
                                                 scheduled_at=scheduled_at,
+                                                platform_configs=platform_configs if platform_configs else None,
                                             )
                                             post_status = result.get("status", "processing")
                                             post_id = result.get("id", "")
                                             st.session_state['last_post_id'] = post_id
 
                                             if post_status == "scheduled":
-                                                st.success("📅 Programmé")
+                                                st.success("📅 Scheduled!")
                                             elif post_status == "posted":
-                                                st.success("🚀 Publié")
+                                                st.success("🚀 Posted!")
                                             else:
-                                                st.info("⏳ En cours...")
+                                                st.info("⏳ Processing...")
                                         except Exception as e:
-                                            st.error(f"Erreur: {e}")
+                                            st.error(f"Error: {e}")
+
+                        # Save to Drafts button
+                        if st.button("💾 Save to Drafts", key="pub_draft",
+                                     use_container_width=True, disabled=not can_publish):
+                            st.info("Draft saved locally.")
 
                         if not can_publish:
                             if not selected_video_path:
-                                st.caption("Sélectionne une vidéo")
+                                st.caption("⚠ Select a video to post")
                             elif not selected_account_ids:
-                                st.caption("Sélectionne un compte")
+                                st.caption("⚠ Select an account to post to")
 
-                    # --- RECENT POST RESULTS ---
+                    # ── RECENT POST RESULTS ──
                     if st.session_state.get('last_post_id'):
                         st.markdown("---")
-                        st.markdown('<p style="color:#86868B;font-size:0.85rem;font-weight:600">Dernier post</p>', unsafe_allow_html=True)
+                        st.markdown('<p class="pb-section-title" style="font-weight:600">Recent post</p>', unsafe_allow_html=True)
                         try:
                             post_results = get_post_results(api_key, st.session_state['last_post_id'])
                             for r in post_results.get("data", []):
@@ -1097,28 +1289,28 @@ def main():
                                 icon = PLATFORM_ICONS.get(platform, "📱")
 
                                 status_class = "pub-posted" if success else "pub-failed"
-                                status_text = "Publié" if success else r.get("error", "Erreur")
+                                status_text = "Posted" if success else r.get("error", "Error")
 
                                 st.markdown(f"""<div class="pub-result-card">
                                     <div style="display:flex;justify-content:space-between;align-items:center">
                                         <span style="color:#F5F5F7">{icon} @{username}</span>
                                         <span class="pub-status {status_class}">{status_text}</span>
                                     </div>
-                                    {"<a href='" + url + "' target='_blank' style='color:#007AFF;font-size:0.8rem'>Voir ↗</a>" if url else ""}
+                                    {"<a href='" + url + "' target='_blank' style='color:#007AFF;font-size:0.8rem'>View ↗</a>" if url else ""}
                                 </div>""", unsafe_allow_html=True)
                         except Exception:
-                            st.caption("Chargement...")
+                            st.caption("Loading...")
 
             except ImportError:
                 st.error("Module postbridge introuvable.")
             except Exception as e:
                 error_msg = str(e)
                 if "401" in error_msg or "403" in error_msg:
-                    st.error("🔑 Clé API invalide.")
+                    st.error("🔑 Invalid API key.")
                 elif "Connection" in error_msg or "Timeout" in error_msg:
-                    st.error("🌐 Connexion impossible.")
+                    st.error("🌐 Connection error.")
                 else:
-                    st.error(f"Erreur: {e}")
+                    st.error(f"Error: {e}")
 
     # ========== TAB 3: STATS ==========
     with tab3:
