@@ -20,33 +20,33 @@ except:
 
 INTENSITY_PRESETS = {
     "low": {
-        "speed_range": (0.97, 1.03),
-        "color_shift": 8,
-        "crop_percent": 2,
-        "noise_strength": 3,
-        "zoom_range": (1.01, 1.03),
-        "pitch_semitones": 0.3,
-        "fps_shift": 0.03,
+        "speed_range": (0.98, 1.02),       # Très subtil — quasi imperceptible
+        "color_shift": 4,                   # Très léger shift couleur
+        "crop_percent": 1,                  # Minimal crop
+        "noise_strength": 4,               # ↑ Noise invisible mais casse pHash
+        "zoom_range": (1.01, 1.04),        # ↑ Zoom subtil mais efficace
+        "pitch_semitones": 0.4,            # ↑ Inaudible mais casse fingerprint
+        "fps_shift": 0.05,                 # ↑ Invisible, change le timing
         "hflip_chance": 0.3,
     },
     "medium": {
-        "speed_range": (0.94, 1.06),
-        "color_shift": 15,
-        "crop_percent": 3,
-        "noise_strength": 5,
-        "zoom_range": (1.02, 1.05),
-        "pitch_semitones": 0.5,
-        "fps_shift": 0.05,
+        "speed_range": (0.97, 1.03),       # ↓ Réduit (était 0.94-1.06) — moins visible
+        "color_shift": 6,                  # ↓↓ Réduit (était 15) — quasi invisible
+        "crop_percent": 1.5,               # ↓ Réduit (était 3) — moins de perte
+        "noise_strength": 6,               # ↑ Augmenté (était 5) — invisible mais puissant
+        "zoom_range": (1.02, 1.06),        # ↑ Augmenté (était 1.02-1.05) — subtil mais efficace
+        "pitch_semitones": 0.6,            # ↑ Augmenté (était 0.5) — inaudible
+        "fps_shift": 0.06,                 # ↑ Augmenté (était 0.05) — invisible
         "hflip_chance": 0.4,
     },
     "high": {
-        "speed_range": (0.88, 1.12),
-        "color_shift": 22,
-        "crop_percent": 4,
-        "noise_strength": 8,
-        "zoom_range": (1.03, 1.07),
-        "pitch_semitones": 0.8,
-        "fps_shift": 0.08,
+        "speed_range": (0.95, 1.05),       # ↓ Réduit (était 0.88-1.12) — moins perceptible
+        "color_shift": 10,                 # ↓↓ Réduit (était 22) — léger shift visible
+        "crop_percent": 2,                 # ↓ Réduit (était 4) — minimal
+        "noise_strength": 10,              # ↑ Augmenté (était 8) — le plus efficace
+        "zoom_range": (1.03, 1.08),        # ↑ Augmenté (était 1.03-1.07)
+        "pitch_semitones": 1.0,            # ↑ Augmenté (était 0.8) — à peine audible
+        "fps_shift": 0.10,                 # ↑ Augmenté (était 0.08)
         "hflip_chance": 0.5,
     }
 }
@@ -73,9 +73,9 @@ def uniquify_video_ffmpeg(input_path, output_path, intensity="medium", enabled_m
     saturation = 1.0
     if mods["hue"]:
         hue_shift = random.randint(-preset["color_shift"], preset["color_shift"])
-        if abs(hue_shift) < 3:
-            hue_shift = random.choice([-1, 1]) * random.randint(3, preset["color_shift"])
-        saturation = random.uniform(0.94, 1.06)
+        if abs(hue_shift) < 2:
+            hue_shift = random.choice([-1, 1]) * random.randint(2, preset["color_shift"])
+        saturation = random.uniform(0.97, 1.03)  # Réduit (était 0.94-1.06) — moins visible
 
     brightness = random.uniform(-0.03, 0.03)  # always subtle, part of encoding
 

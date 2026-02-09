@@ -198,6 +198,9 @@ st.markdown("""
 def estimate_uniqueness(modifications):
     """Estime l'unicité basée sur les vrais poids de détection TikTok/Instagram.
 
+    Stratégie : maximiser les modifications INVISIBLES (noise, zoom, pitch, metadata)
+    et réduire le poids des modifications VISIBLES (hue, speed).
+
     Poids réels des systèmes de détection:
     - Perceptual hash visuel (pHash/DCT): 30-35% → noise + zoom le cassent
     - Deep learning / structure: 25-30% → zoom + crop + flip le trompent
@@ -207,64 +210,63 @@ def estimate_uniqueness(modifications):
     """
     score = 0
 
-    # === VISUAL HASH BREAKING (max 35 pts — poids réel ~30-35%) ===
+    # === VISUAL HASH BREAKING (max 35 pts) ===
+    # Priorité aux mods INVISIBLES
 
-    # Pixel noise — le plus efficace contre pHash/DCT
+    # Pixel noise — INVISIBLE et le plus efficace contre pHash/DCT
     noise = modifications.get("noise", 0)
-    score += min(noise * 3.5, 15)  # max 15 pts (noise 1-5 = 3.5-17.5, capped 15)
+    score += min(noise * 3, 18)  # ↑ max 18 pts (noise très valorisé car invisible)
 
-    # Zoom — repositionne TOUS les pixels, casse le hash
+    # Zoom — QUASI INVISIBLE et repositionne tous les pixels
     zoom = modifications.get("zoom", 1.0)
     zoom_pct = (zoom - 1.0) * 100
-    score += min(zoom_pct * 3, 12)  # max 12 pts (2-5% zoom = 6-15, capped 12)
+    score += min(zoom_pct * 3.5, 14)  # ↑ max 14 pts (zoom valorisé car subtil)
 
-    # Gamma — change la distribution des pixels
+    # Gamma — INVISIBLE, change la distribution des pixels
     gamma = abs(modifications.get("gamma", 1.0) - 1.0)
-    score += min(gamma * 150, 5)  # max 5 pts
+    score += min(gamma * 200, 5)  # max 5 pts
 
-    # Hue shift — change la couleur (pHash est partiellement résistant)
+    # Hue shift — VISIBLE, pHash partiellement résistant
     hue = abs(modifications.get("hue_shift", 0))
-    score += min(hue * 0.2, 3)  # max 3 pts (moins efficace seul)
+    score += min(hue * 0.15, 2)  # ↓ max 2 pts (réduit car visible)
 
-    # === STRUCTURAL CHANGES (max 25 pts — poids réel ~25-30%) ===
+    # === STRUCTURAL CHANGES (max 22 pts) ===
 
-    # Horizontal flip — inverse TOUTES les relations spatiales
+    # Horizontal flip — efficace mais visible
     if modifications.get("hflip", False):
-        score += 15  # très efficace
+        score += 12  # ↓ Réduit (était 15) — visible si texte dans vidéo
 
-    # Crop — change les bords du frame
+    # Crop — subtil à faible %
     crop = modifications.get("crop_percent", 0)
-    score += min(crop * 2, 6)  # max 6 pts
+    score += min(crop * 2, 4)  # max 4 pts
 
-    # Speed — change le fingerprint temporel
+    # Speed — VISIBLE si trop fort, réduit
     speed = modifications.get("speed", 1.0)
     speed_diff = abs(speed - 1.0)
-    score += min(speed_diff * 60, 4)  # max 4 pts
+    score += min(speed_diff * 40, 3)  # ↓ max 3 pts (réduit car visible)
 
-    # === AUDIO FINGERPRINT BREAKING (max 25 pts — poids réel ~20-25%) ===
+    # === AUDIO FINGERPRINT BREAKING (max 28 pts) ===
+    # Priorité maximale — INAUDIBLE à faible valeur
 
-    # Pitch shift — CRITIQUE contre les systèmes type Shazam
+    # Pitch shift — INAUDIBLE <0.5st et CRITIQUE contre Shazam-like
     pitch = abs(modifications.get("pitch_semitones", 0))
-    score += min(pitch * 30, 18)  # max 18 pts (0.5 semitone = 15 pts)
+    score += min(pitch * 35, 20)  # ↑ max 20 pts (pitch très valorisé car inaudible)
 
-    # FPS shift — change le timing audio/vidéo
+    # FPS shift — INVISIBLE, change le timing
     fps = modifications.get("fps", 30)
     fps_diff = abs(fps - 30)
-    score += min(fps_diff * 40, 4)  # max 4 pts
+    score += min(fps_diff * 50, 5)  # ↑ max 5 pts
 
-    # Volume variation
-    score += 3  # toujours appliqué
+    # Volume variation — toujours appliqué
+    score += 3
 
-    # === METADATA + FILE (max 15 pts — poids réel ~5-10%) ===
+    # === METADATA + FILE (max 15 pts) ===
 
     if modifications.get("metadata_randomized", False):
         score += 5
 
-    # Re-encoding params (CRF + GOP)
-    score += 5  # toujours un re-encoding unique
-
-    # Bitstream unique garanti par CRF + GOP + bf
-    score += 3
+    # Re-encoding unique (CRF + GOP + B-frames)
+    score += 8  # ↑ toujours un re-encoding unique
 
     return {'uniqueness': min(round(score), 100)}
 
@@ -394,11 +396,11 @@ def main():
         score_details = []
 
         if mod_noise:
-            pts = 12
+            pts = 14  # Invisible — très efficace contre pHash
             preview_score += pts
             score_details.append(f"📡 Noise: +{pts} pts")
         if mod_zoom:
-            pts = 10
+            pts = 12  # Quasi invisible — repositionne tous les pixels
             preview_score += pts
             score_details.append(f"🔍 Zoom: +{pts} pts")
         if mod_gamma:
@@ -406,34 +408,33 @@ def main():
             preview_score += pts
             score_details.append(f"🌗 Gamma: +{pts} pts")
         if mod_hue:
-            pts = 2
+            pts = 1  # Visible — réduit
             preview_score += pts
             score_details.append(f"🎨 Hue: +{pts} pts")
         if mod_hflip:
             # 40% chance in medium, so average contribution
-            pts = 6  # 15 * 0.4 average
+            pts = 5  # 12 * 0.4 average
             preview_score += pts
             score_details.append(f"🪞 Miroir: +{pts} pts (moy.)")
         if mod_crop:
-            pts = 4
+            pts = 2  # Réduit — crop minimal
             preview_score += pts
             score_details.append(f"✂️ Crop: +{pts} pts")
         if mod_speed:
-            pts = 2
+            pts = 1  # Visible — réduit
             preview_score += pts
             score_details.append(f"🔄 Speed: +{pts} pts")
         if mod_pitch:
-            pts = 15
+            pts = 17  # Inaudible — très efficace contre fingerprint audio
             preview_score += pts
             score_details.append(f"🎵 Pitch: +{pts} pts")
         if mod_fps:
-            pts = 2
+            pts = 3  # Invisible — change le timing
             preview_score += pts
             score_details.append(f"🎞️ FPS: +{pts} pts")
-        # Volume always applied when pitch is on
-        if mod_pitch:
-            preview_score += 3
-            score_details.append(f"🔊 Volume: +3 pts")
+        # Volume always applied
+        preview_score += 3
+        score_details.append(f"🔊 Volume: +3 pts")
         if mod_meta:
             pts = 5
             preview_score += pts
@@ -444,7 +445,7 @@ def main():
 
         preview_score = min(preview_score, 100)
 
-        badge_class = "badge-safe" if preview_score >= 80 else "badge-danger"
+        badge_class = "badge-safe" if preview_score >= 60 else "badge-danger"
         st.markdown(f"""
         <div style="background:#1C1C1E;border:1px solid #2C2C2E;border-radius:12px;padding:16px;margin:8px 0">
             <div style="display:flex;align-items:center;justify-content:space-between">
@@ -455,7 +456,7 @@ def main():
                 {"  •  ".join(score_details)}
             </div>
             <div style="margin-top:8px;color:#48484A;font-size:0.75rem">
-                {"🟢 Au-dessus de 80% = suffisamment unique pour TikTok/Instagram" if preview_score >= 80 else "🔴 En dessous de 80% — active plus de modifications pour être safe"}
+                {"🟢 Au-dessus de 60% = suffisamment unique pour TikTok/Instagram" if preview_score >= 60 else "🔴 En dessous de 60% — active plus de modifications pour être safe"}
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -548,7 +549,7 @@ def main():
                 st.markdown(f"<div class='folder-badge'>📁 outputs/{st.session_state.get('single_folder', '')}/</div>", unsafe_allow_html=True)
 
                 st.markdown("""<div class="legend">
-                🟢 <b>≥ 80%</b> = Suffisamment unique &nbsp;&nbsp;|&nbsp;&nbsp; 🔴 <b>< 80%</b> = Trop similaire à l'original
+                🟢 <b>≥ 60%</b> = Suffisamment unique &nbsp;&nbsp;|&nbsp;&nbsp; 🔴 <b>< 60%</b> = Trop similaire à l'original
                 </div>""", unsafe_allow_html=True)
 
                 for a in analyses:
@@ -556,7 +557,7 @@ def main():
                     cols[0].markdown(f"**{a['name']}**")
                     cols[1].markdown(format_modifications(a.get('modifications', {})), unsafe_allow_html=True)
                     u = a['uniqueness']
-                    badge = 'badge-safe' if u >= 80 else 'badge-danger'
+                    badge = 'badge-safe' if u >= 60 else 'badge-danger'
                     cols[2].markdown(f"<span class='{badge}'>{u:.0f}%</span>", unsafe_allow_html=True)
                     output_path = a.get('output_path', '')
                     if output_path and os.path.exists(output_path):
@@ -659,15 +660,15 @@ def main():
                 total_videos = sum(r['success_count'] for r in results)
                 all_variations = [v for r in results for v in r['variations']]
                 avg_uniqueness = sum(v['uniqueness'] for v in all_variations) / len(all_variations) if all_variations else 0
-                safe_count = sum(1 for v in all_variations if v['uniqueness'] >= 80)
+                safe_count = sum(1 for v in all_variations if v['uniqueness'] >= 60)
 
                 col_a, col_b, col_c = st.columns(3)
                 col_a.metric("📹 Total", total_videos)
                 col_b.metric("📊 Unicité moy.", f"{avg_uniqueness:.0f}%")
-                col_c.metric("✅ Safe (≥80%)", f"{safe_count}/{len(all_variations)}")
+                col_c.metric("✅ Safe (≥60%)", f"{safe_count}/{len(all_variations)}")
 
                 st.markdown("""<div class="legend">
-                🟢 <b>≥ 80%</b> = Suffisamment unique &nbsp;&nbsp;|&nbsp;&nbsp; 🔴 <b>< 80%</b> = Trop similaire
+                🟢 <b>≥ 60%</b> = Suffisamment unique &nbsp;&nbsp;|&nbsp;&nbsp; 🔴 <b>< 60%</b> = Trop similaire
                 </div>""", unsafe_allow_html=True)
 
                 for r in results:
@@ -678,7 +679,7 @@ def main():
                                 cols[0].markdown(f"**{v['name']}**")
                                 cols[1].markdown(format_modifications(v.get('modifications', {})), unsafe_allow_html=True)
                                 u = v['uniqueness']
-                                badge = 'badge-safe' if u >= 80 else 'badge-danger'
+                                badge = 'badge-safe' if u >= 60 else 'badge-danger'
                                 cols[2].markdown(f"<span class='{badge}'>{u:.0f}%</span>", unsafe_allow_html=True)
                                 vpath = v.get('output_path', '')
                                 if vpath and os.path.exists(vpath):
