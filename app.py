@@ -4,46 +4,11 @@ TikFusion - Apple-inspired design
 import streamlit as st
 import os
 import sys
-import json
 import tempfile
-import base64
 from pathlib import Path
 from datetime import datetime
-from dotenv import load_dotenv
-
-load_dotenv()
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
-
-
-def _get_api_key():
-    """Charge la clé API PostBridge depuis .env ou session_state."""
-    if 'pb_api_key_saved' in st.session_state and st.session_state['pb_api_key_saved']:
-        return st.session_state['pb_api_key_saved']
-    key = os.getenv("POSTBRIDGE_API_KEY", "")
-    if key:
-        st.session_state['pb_api_key_saved'] = key
-    return key
-
-
-def _save_api_key(key):
-    """Sauvegarde la clé API dans .env et session_state."""
-    st.session_state['pb_api_key_saved'] = key
-    env_path = os.path.join(os.path.dirname(__file__), ".env")
-    lines = []
-    found = False
-    if os.path.exists(env_path):
-        with open(env_path, "r") as f:
-            for line in f:
-                if line.startswith("POSTBRIDGE_API_KEY="):
-                    lines.append(f"POSTBRIDGE_API_KEY={key}\n")
-                    found = True
-                else:
-                    lines.append(line)
-    if not found:
-        lines.append(f"POSTBRIDGE_API_KEY={key}\n")
-    with open(env_path, "w") as f:
-        f.writelines(lines)
 
 st.set_page_config(page_title="TikFusion x LTP", page_icon="assets/favicon.svg", layout="wide", initial_sidebar_state="collapsed")
 
@@ -126,130 +91,6 @@ st.markdown("""
     .tag-noise { background: #2C2C2E; color: #FF6482; border: 1px solid #3A3A3C; }
     .tag-pitch { background: #2C2C2E; color: #5E5CE6; border: 1px solid #3A3A3C; }
     .tag-meta { background: #2C2C2E; color: #BF5AF2; border: 1px solid #3A3A3C; }
-
-    /* Publish — invisible checkbox overlaid on avatar */
-    .stElementContainer:has(.stCheckbox) {
-        width: 100% !important;
-        max-width: 100% !important;
-        margin-top: -48px !important;
-        margin-bottom: 0 !important;
-        height: 48px !important;
-    }
-    .stCheckbox {
-        width: 100% !important;
-        height: 48px !important;
-        opacity: 0 !important;
-        cursor: pointer !important;
-    }
-    .stCheckbox > div {
-        width: 100% !important;
-        height: 48px !important;
-    }
-    .stCheckbox label {
-        width: 100% !important;
-        height: 48px !important;
-        min-height: 0 !important;
-        padding: 0 !important;
-        cursor: pointer !important;
-        display: block !important;
-    }
-    .stCheckbox label span[data-testid="stCheckboxLabel"] {
-        display: none !important;
-    }
-
-    /* Publish — PostBridge-exact */
-    .pb-acc {
-        position: relative;
-        width: 48px;
-        display: inline-block;
-        cursor: pointer;
-    }
-    .pb-acc-circle {
-        width: 48px;
-        height: 48px;
-        border-radius: 50%;
-        border: 2px solid #3A3A3C;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 1.2rem;
-        background: #2C2C2E;
-        overflow: hidden;
-        opacity: 0.5;
-        filter: grayscale(100%);
-        transition: all 0.2s ease;
-    }
-    .pb-acc-circle:hover {
-        opacity: 0.75;
-        filter: grayscale(0%);
-    }
-    .pb-acc.selected .pb-acc-circle {
-        opacity: 1;
-        filter: grayscale(0%);
-        border-color: #007AFF;
-    }
-    .pb-acc-platform {
-        position: absolute;
-        top: -4px;
-        left: -4px;
-        width: 20px;
-        height: 20px;
-        border-radius: 50%;
-        background: #1C1C1E;
-        border: 1px solid #3A3A3C;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 0.55rem;
-        z-index: 2;
-    }
-    .pb-section-title {
-        font-size: 0.85rem;
-        font-weight: 500;
-        color: #86868B;
-        margin: 0 0 4px 0;
-    }
-    .pb-page-title {
-        font-size: 1.5rem;
-        font-weight: 700;
-        color: #F5F5F7;
-        margin: 0 0 8px 0;
-    }
-    .pb-media-preview-box {
-        background: #1C1C1E;
-        border: 1px solid #2C2C2E;
-        border-radius: 12px;
-        padding: 12px;
-        text-align: center;
-    }
-    .pb-caption-counter {
-        text-align: right;
-        color: #48484A;
-        font-size: 0.75rem;
-        margin-top: -6px;
-    }
-
-    /* Publish — status badges */
-    .pub-status {
-        display: inline-block;
-        padding: 3px 10px;
-        border-radius: 12px;
-        font-size: 0.75rem;
-        font-weight: 600;
-    }
-    .pub-scheduled { background: #FF9F0A33; color: #FF9F0A; }
-    .pub-posted { background: #30D15833; color: #30D158; }
-    .pub-processing { background: #007AFF33; color: #007AFF; }
-    .pub-failed { background: #FF453A33; color: #FF453A; }
-
-    /* Publish — result card */
-    .pub-result-card {
-        background: #1C1C1E;
-        border: 1px solid #2C2C2E;
-        border-radius: 12px;
-        padding: 12px 16px;
-        margin: 4px 0;
-    }
 
     /* Uniqueness badges */
     .badge-safe {
@@ -348,13 +189,83 @@ st.markdown("""
         background: #2C2C2E;
         border: 1px solid #3A3A3C;
         border-radius: 8px;
-        font-size: 0.85rem;
+        font-size: 0.8rem;
+        padding: 4px 10px;
     }
 
     /* Expander */
     .streamlit-expanderHeader {
         background: #1C1C1E;
         border-radius: 12px;
+    }
+
+    /* Compact video preview */
+    .compact-video video,
+    .compact-video iframe {
+        max-height: 180px !important;
+        border-radius: 10px;
+    }
+
+    /* Compact variation rows */
+    .var-row-compact {
+        background: #1C1C1E;
+        border-radius: 10px;
+        padding: 8px 12px;
+        margin: 4px 0;
+        border: 1px solid #2C2C2E;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    .var-row-compact:hover { background: #2C2C2E; }
+
+    .var-name {
+        font-weight: 600;
+        font-size: 0.85rem;
+        color: #F5F5F7;
+        min-width: 36px;
+    }
+    .var-tags {
+        flex: 1;
+        line-height: 1.6;
+    }
+    .var-score {
+        min-width: 50px;
+        text-align: center;
+    }
+
+    /* Smaller tags */
+    .tag-sm {
+        display: inline-block;
+        padding: 2px 6px;
+        border-radius: 5px;
+        font-size: 0.65rem;
+        font-weight: 500;
+        margin: 1px 1px;
+    }
+
+    /* Mini video previews in expander */
+    .mini-preview video,
+    .mini-preview iframe {
+        max-height: 120px !important;
+        border-radius: 8px;
+    }
+
+    /* Compact header */
+    .header-bar {
+        padding: 12px 0 8px 0 !important;
+        margin-bottom: 16px !important;
+    }
+
+    /* Tighter metrics */
+    [data-testid="stMetric"] {
+        padding: 10px !important;
+    }
+
+    /* Compact config section */
+    .config-section h4 {
+        margin-top: 8px !important;
+        margin-bottom: 4px !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -471,6 +382,34 @@ def format_modifications(mods):
     return " ".join(tags) if tags else '<span style="color:#48484A">—</span>'
 
 
+def format_modifications_compact(mods):
+    """Formate les modifications en petits tags compacts (2 lignes)"""
+    tags = []
+    if mods.get("hflip"):
+        tags.append('<span class="tag-sm tag-mirror">🪞 Miroir</span>')
+    speed = mods.get("speed", 1.0)
+    if abs(speed - 1.0) > 0.005:
+        tags.append(f'<span class="tag-sm tag-speed">🔄 x{speed:.2f}</span>')
+    hue = mods.get("hue_shift", 0)
+    if abs(hue) > 0:
+        tags.append(f'<span class="tag-sm tag-hue">🎨 {hue:+d}°</span>')
+    crop = mods.get("crop_percent", 0)
+    if crop > 0.1:
+        tags.append(f'<span class="tag-sm tag-crop">✂️ {crop:.1f}%</span>')
+    zoom = mods.get("zoom", 1.0)
+    if zoom > 1.005:
+        tags.append(f'<span class="tag-sm tag-zoom">🔍 {(zoom-1)*100:.1f}%</span>')
+    noise = mods.get("noise", 0)
+    if noise > 0:
+        tags.append(f'<span class="tag-sm tag-noise">📡 N{noise:.0f}</span>')
+    pitch = mods.get("pitch_semitones", 0)
+    if abs(pitch) > 0.05:
+        tags.append(f'<span class="tag-sm tag-pitch">🎵 {pitch:+.1f}st</span>')
+    if mods.get("metadata_randomized"):
+        tags.append('<span class="tag-sm tag-meta">🏷️ Meta</span>')
+    return " ".join(tags) if tags else '<span style="color:#48484A;font-size:0.7rem">—</span>'
+
+
 def get_uniqueness_badge(score):
     """Retourne la classe CSS du badge selon le score d'unicité.
     ≥60% = safe (vert) — passe TikTok + Instagram
@@ -502,11 +441,11 @@ def main():
     """, unsafe_allow_html=True)
 
     # ============ TABS ============
-    tab1, tab2, tab5, tab3, tab4 = st.tabs(["📤 Single", "📦 Bulk", "🚀 Publier", "📊 Stats", "⚙️ Config"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📤 Single", "📦 Bulk", "📊 Statistiques", "⚙️ Configuration"])
 
     # ========== TAB 4: CONFIG (read first for variables) ==========
     with tab4:
-        st.markdown("### ⚙️ Configuration")
+        st.markdown("### ⚙️ Configuration générale")
         c1, c2 = st.columns(2)
         with c1:
             output_dir = st.text_input("📁 Dossier de sortie", value="outputs", key="cfg_output")
@@ -654,41 +593,6 @@ def main():
         """, unsafe_allow_html=True)
 
         st.markdown("---")
-
-        # === POSTBRIDGE API KEY ===
-        st.markdown("### 🔑 PostBridge API")
-        current_key = _get_api_key()
-        masked = f"{'•' * 8}...{current_key[-6:]}" if len(current_key) > 6 else ""
-
-        if current_key:
-            st.markdown(f'<span style="color:#30D158;font-size:0.85rem">✅ Clé configurée : <code>{masked}</code></span>', unsafe_allow_html=True)
-
-        new_key = st.text_input(
-            "Clé API PostBridge",
-            type="password",
-            key="cfg_pb_key",
-            placeholder="pb_live_..." if not current_key else "Laisser vide pour garder la clé actuelle",
-            label_visibility="collapsed"
-        )
-        if st.button("💾 Sauvegarder la clé", key="cfg_save_key"):
-            if new_key.strip():
-                _save_api_key(new_key.strip())
-                st.success("✅ Clé sauvegardée")
-                st.rerun()
-            elif not current_key:
-                st.warning("Entre une clé API.")
-
-        if current_key:
-            with st.expander("🔧 Debug API PostBridge"):
-                if st.button("Voir les champs d'un compte", key="cfg_debug_fields"):
-                    try:
-                        from postbridge import get_account_fields
-                        fields = get_account_fields(current_key)
-                        st.json(fields)
-                    except Exception as e:
-                        st.error(f"Erreur: {e}")
-
-        st.markdown("---")
         if os.path.exists(output_dir):
             st.markdown("**📁 Sessions récentes**")
             folders = sorted([f for f in os.listdir(output_dir) if os.path.isdir(os.path.join(output_dir, f))], reverse=True)
@@ -723,23 +627,24 @@ def main():
 
     # ========== TAB 1: SINGLE UPLOAD ==========
     with tab1:
-        col_upload, col_results = st.columns([1, 2])
+        col_upload, col_results = st.columns([1, 3])
 
         with col_upload:
             uploaded = st.file_uploader("📹 Vidéo source", type=['mp4', 'mov', 'avi'], key="single")
 
             if uploaded:
+                st.markdown('<div class="compact-video">', unsafe_allow_html=True)
                 st.video(uploaded)
-                num_vars = st.slider("Nombre de variations", 1, 15, 5, key="single_vars")
+                st.markdown('</div>', unsafe_allow_html=True)
+                num_vars = st.slider("Variations", 1, 15, 5, key="single_vars")
 
-                if st.button("Générer les variations", type="primary", key="single_btn"):
+                if st.button("Générer", type="primary", key="single_btn", use_container_width=True):
                     with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp:
                         tmp.write(uploaded.read())
                         original_path = tmp.name
 
                     progress = st.progress(0)
                     status = st.empty()
-                    results_container = st.empty()
 
                     try:
                         from uniquifier import uniquify_video_ffmpeg
@@ -764,13 +669,12 @@ def main():
 
                             progress.progress((i + 1) / num_vars)
 
-                            # Show partial results as they arrive
                             st.session_state['single_analyses'] = analyses
                             st.session_state['single_folder'] = folder_name
 
                         status.empty()
                         progress.empty()
-                        st.success(f"✅ {len(analyses)} variations générées")
+                        st.success(f"✅ {len(analyses)} variations")
 
                         os.unlink(original_path)
                     except Exception as e:
@@ -780,37 +684,46 @@ def main():
             if 'single_analyses' in st.session_state:
                 analyses = st.session_state['single_analyses']
 
-                st.markdown(f"<div class='folder-badge'>📁 outputs/{st.session_state.get('single_folder', '')}/</div>", unsafe_allow_html=True)
+                # Header row: folder badge + legend inline
+                h1, h2 = st.columns([1, 2])
+                h1.markdown(f"<div class='folder-badge'>📁 {st.session_state.get('single_folder', '')}/</div>", unsafe_allow_html=True)
+                h2.markdown(LEGEND_HTML, unsafe_allow_html=True)
 
-                st.markdown(LEGEND_HTML, unsafe_allow_html=True)
-
-                for a in analyses:
-                    cols = st.columns([1, 3, 1, 1])
-                    cols[0].markdown(f"**{a['name']}**")
-                    cols[1].markdown(format_modifications(a.get('modifications', {})), unsafe_allow_html=True)
+                # Compact variation rows
+                for idx, a in enumerate(analyses):
                     u = a['uniqueness']
                     badge = get_uniqueness_badge(u)
-                    cols[2].markdown(f"<span class='{badge}'>{u:.0f}%</span>", unsafe_allow_html=True)
+                    mods_html = format_modifications_compact(a.get('modifications', {}))
+                    st.markdown(f"""<div class="var-row-compact">
+                        <span class="var-name">{a['name']}</span>
+                        <span class="var-tags">{mods_html}</span>
+                        <span class="var-score"><span class="{badge}">{u:.0f}%</span></span>
+                    </div>""", unsafe_allow_html=True)
+                    # Download button (Streamlit native - must be outside HTML)
                     output_path = a.get('output_path', '')
                     if output_path and os.path.exists(output_path):
                         with open(output_path, "rb") as f:
-                            cols[3].download_button("⬇️", f.read(), file_name=Path(output_path).name, mime="video/mp4", key=f"dl_{a['name']}")
+                            st.download_button(f"⬇️ {a['name']}.mp4", f.read(), file_name=Path(output_path).name, mime="video/mp4", key=f"dl_{a['name']}")
 
-                # Video previews in a separate expandable section
-                with st.expander("▶️ Previews vidéo", expanded=False):
-                    for a in analyses:
+                # Mini video previews
+                with st.expander("▶️ Aperçus vidéo", expanded=False):
+                    prev_cols = st.columns(3)
+                    for idx, a in enumerate(analyses):
                         output_path = a.get('output_path', '')
                         if output_path and os.path.exists(output_path):
-                            st.caption(a['name'])
-                            st.video(output_path, format="video/mp4")
+                            with prev_cols[idx % 3]:
+                                st.caption(a['name'])
+                                st.markdown('<div class="mini-preview">', unsafe_allow_html=True)
+                                st.video(output_path, format="video/mp4")
+                                st.markdown('</div>', unsafe_allow_html=True)
 
     # ========== TAB 2: BULK UPLOAD ==========
     with tab2:
-        col_upload, col_results = st.columns([1, 1])
+        col_upload, col_results = st.columns([1, 2])
 
         with col_upload:
             uploaded_files = st.file_uploader(
-                "📹 Sélectionne plusieurs vidéos",
+                "📹 Plusieurs vidéos",
                 type=['mp4', 'mov', 'avi'],
                 accept_multiple_files=True,
                 key="bulk"
@@ -818,21 +731,21 @@ def main():
 
             if uploaded_files:
                 if len(uploaded_files) > 10:
-                    st.warning("⚠️ Maximum 10 vidéos. Seules les 10 premières seront traitées.")
+                    st.warning("⚠️ Max 10 vidéos.")
                     uploaded_files = uploaded_files[:10]
-                st.success(f"📁 {len(uploaded_files)} vidéos sélectionnées")
+                st.success(f"{len(uploaded_files)} vidéos")
 
-                for f in uploaded_files[:5]:
-                    st.text(f"  📹 {f.name}")
-                if len(uploaded_files) > 5:
-                    st.text(f"  ... +{len(uploaded_files) - 5} autres")
+                for f in uploaded_files[:3]:
+                    st.caption(f"📹 {f.name}")
+                if len(uploaded_files) > 3:
+                    st.caption(f"... +{len(uploaded_files) - 3} autres")
 
-                vars_per_video = st.slider("Variations par vidéo", 1, 10, 3, key="bulk_vars")
+                vars_per_video = st.slider("Var / vidéo", 1, 10, 3, key="bulk_vars")
 
                 total = len(uploaded_files) * vars_per_video
-                st.warning(f"⚠️ Total : **{total} vidéos** seront générées")
+                st.info(f"**{total} vidéos** au total")
 
-                if st.button("Lancer le traitement", type="primary", key="bulk_btn"):
+                if st.button("Lancer", type="primary", key="bulk_btn", use_container_width=True):
                     bulk_folder = get_dated_folder_name() + " - BULK"
                     bulk_path = os.path.join(output_dir, bulk_folder)
                     os.makedirs(bulk_path, exist_ok=True)
@@ -882,7 +795,7 @@ def main():
 
                         status.empty()
                         total_success = sum(r['success_count'] for r in all_results)
-                        st.success(f"✅ {total_success} vidéos générées")
+                        st.success(f"✅ {total_success} vidéos")
 
                     except Exception as e:
                         st.error(f"Erreur: {e}")
@@ -891,389 +804,53 @@ def main():
             if 'bulk_results' in st.session_state:
                 results = st.session_state['bulk_results']
                 bulk_folder = st.session_state.get('bulk_folder', '')
-                bulk_path = st.session_state.get('bulk_path', '')
 
-                st.markdown(f"<div class='folder-badge'>📁 outputs/{bulk_folder}/</div>", unsafe_allow_html=True)
-
+                # Summary metrics inline
                 total_videos = sum(r['success_count'] for r in results)
                 all_variations = [v for r in results for v in r['variations']]
                 avg_uniqueness = sum(v['uniqueness'] for v in all_variations) / len(all_variations) if all_variations else 0
                 safe_count = sum(1 for v in all_variations if v['uniqueness'] >= 60)
 
-                col_a, col_b, col_c = st.columns(3)
-                col_a.metric("📹 Total", total_videos)
-                col_b.metric("📊 Unicité moy.", f"{avg_uniqueness:.0f}%")
-                col_c.metric("✅ Safe (≥60%)", f"{safe_count}/{len(all_variations)}")
+                m1, m2, m3 = st.columns(3)
+                m1.metric("📹 Total", total_videos)
+                m2.metric("📊 Moy.", f"{avg_uniqueness:.0f}%")
+                m3.metric("✅ Safe", f"{safe_count}/{len(all_variations)}")
 
                 st.markdown(LEGEND_HTML, unsafe_allow_html=True)
 
                 for r in results:
-                    with st.expander(f"📹 {r['name']} — {r['success_count']} variations"):
+                    with st.expander(f"📹 {r['name']} — {r['success_count']} var."):
                         if r['variations']:
                             for v in r['variations']:
-                                cols = st.columns([1, 3, 1, 1])
-                                cols[0].markdown(f"**{v['name']}**")
-                                cols[1].markdown(format_modifications(v.get('modifications', {})), unsafe_allow_html=True)
                                 u = v['uniqueness']
                                 badge = get_uniqueness_badge(u)
-                                cols[2].markdown(f"<span class='{badge}'>{u:.0f}%</span>", unsafe_allow_html=True)
+                                mods_html = format_modifications_compact(v.get('modifications', {}))
+                                st.markdown(f"""<div class="var-row-compact">
+                                    <span class="var-name">{v['name']}</span>
+                                    <span class="var-tags">{mods_html}</span>
+                                    <span class="var-score"><span class="{badge}">{u:.0f}%</span></span>
+                                </div>""", unsafe_allow_html=True)
                                 vpath = v.get('output_path', '')
                                 if vpath and os.path.exists(vpath):
                                     with open(vpath, "rb") as f:
-                                        cols[3].download_button("⬇️", f.read(), file_name=f"{r['name']}_{v['name']}.mp4", mime="video/mp4", key=f"dl_bulk_{r['name']}_{v['name']}")
+                                        st.download_button(f"⬇️ {v['name']}.mp4", f.read(), file_name=f"{r['name']}_{v['name']}.mp4", mime="video/mp4", key=f"dl_bulk_{r['name']}_{v['name']}")
 
-                            with st.expander("▶️ Previews", expanded=False):
-                                for v in r['variations']:
+                            with st.expander("▶️ Aperçus", expanded=False):
+                                pcols = st.columns(3)
+                                for vi, v in enumerate(r['variations']):
                                     vpath = v.get('output_path', '')
                                     if vpath and os.path.exists(vpath):
-                                        st.caption(v['name'])
-                                        st.video(vpath, format="video/mp4")
+                                        with pcols[vi % 3]:
+                                            st.caption(v['name'])
+                                            st.markdown('<div class="mini-preview">', unsafe_allow_html=True)
+                                            st.video(vpath, format="video/mp4")
+                                            st.markdown('</div>', unsafe_allow_html=True)
             else:
                 st.info("👈 Upload plusieurs vidéos et lance le traitement")
 
-    # ========== TAB 5: PUBLISH (PostBridge-exact clone) ==========
-    with tab5:
-        api_key = _get_api_key()
-
-        if not api_key:
-            st.markdown("""<div class="apple-card" style="text-align:center;padding:40px">
-                <div style="font-size:2rem;margin-bottom:12px">🔑</div>
-                <p style="color:#F5F5F7;font-weight:600;margin:0">Configure ta clé PostBridge</p>
-                <p style="color:#48484A;font-size:0.8rem;margin:8px 0 0 0">
-                    Va dans l'onglet <b>⚙️ Config</b> pour entrer ta clé API PostBridge.
-                </p>
-            </div>""", unsafe_allow_html=True)
-        else:
-            try:
-                from postbridge import list_accounts, upload_video, create_post, get_post_results, PLATFORM_ICONS
-
-                if 'pb_accounts' not in st.session_state:
-                    with st.spinner("Chargement des comptes..."):
-                        st.session_state['pb_accounts'] = list_accounts(api_key)
-
-                accounts = st.session_state.get('pb_accounts', [])
-
-                if not accounts:
-                    st.warning("Aucun compte connecté. Ajoute tes comptes sur post-bridge.com")
-                else:
-                    # ── PAGE TITLE ──
-                    st.markdown('<p class="pb-page-title">Create video post</p>', unsafe_allow_html=True)
-
-                    # ── TOOLBAR: Search & Filter (small) | Remember (right) ──
-                    tb1, tb2, tb3, tb4 = st.columns([2, 5, 1, 2])
-                    with tb1:
-                        all_platforms = sorted(set(a.get("platform", "unknown") for a in accounts))
-                        if len(all_platforms) > 1:
-                            platform_options = ["All"] + all_platforms
-                            selected_platform = st.selectbox(
-                                "🔍 Filter", platform_options,
-                                key="pub_platform_filter", label_visibility="collapsed",
-                            )
-                        else:
-                            selected_platform = "All"
-                    with tb3:
-                        if st.button("🔄", key="pb_refresh", help="Refresh"):
-                            with st.spinner("..."):
-                                st.session_state['pb_accounts'] = list_accounts(api_key)
-                                st.rerun()
-                    with tb4:
-                        remember_active = st.session_state.get('pb_remember', False)
-                        if st.button(f"{'🟢' if remember_active else '⚪'} Remember", key="pb_remember_btn"):
-                            if not remember_active:
-                                current_sel = [a.get("id") for a in accounts if st.session_state.get(f"pub_sel_{a.get('id')}", False)]
-                                st.session_state['pb_remembered_ids'] = current_sel
-                                st.session_state['pb_remember'] = True
-                            else:
-                                st.session_state['pb_remember'] = False
-                                st.session_state.pop('pb_remembered_ids', None)
-                            st.rerun()
-
-                    filtered_accounts = accounts if selected_platform == "All" else [
-                        a for a in accounts if a.get("platform") == selected_platform
-                    ]
-
-                    # ── ACCOUNT AVATARS ──
-                    remembered_ids = st.session_state.get('pb_remembered_ids', [])
-                    for acc in filtered_accounts:
-                        acc_id = acc.get("id")
-                        key = f"pub_sel_{acc_id}"
-                        if key not in st.session_state:
-                            st.session_state[key] = acc_id in remembered_ids if remembered_ids else False
-
-                    selected_account_ids = []
-                    selected_platforms = set()
-                    max_acc = min(len(filtered_accounts), 10)
-
-                    if max_acc > 0:
-                        # Each column = avatar + checkbox, add spacer column to prevent stretching
-                        col_widths = [1] * max_acc + [max(1, 10 - max_acc)]
-                        acc_cols = st.columns(col_widths)
-                        for idx, acc in enumerate(filtered_accounts[:max_acc]):
-                            acc_id = acc.get("id")
-                            platform = acc.get("platform", "unknown")
-                            username = acc.get("username", "compte")
-                            icon = PLATFORM_ICONS.get(platform, "📱")
-                            sel_key = f"pub_sel_{acc_id}"
-                            is_sel = st.session_state.get(sel_key, False)
-                            border_c = "#007AFF" if is_sel else "#3A3A3C"
-                            opa = "1" if is_sel else "0.5"
-                            gs = "0%" if is_sel else "100%"
-                            with acc_cols[idx]:
-                                st.markdown(f'''<div class="pb-acc-wrap" style="position:relative;width:48px;margin:0 auto">
-                                    <div class="pb-acc {'selected' if is_sel else ''}" title="{username}">
-                                        <div class="pb-acc-platform">{icon}</div>
-                                        <div class="pb-acc-circle" style="border-color:{border_c};opacity:{opa};filter:grayscale({gs})">
-                                            <span style="font-size:1.1rem">{icon}</span>
-                                        </div>
-                                    </div>
-                                </div>''', unsafe_allow_html=True)
-                                if st.checkbox("x", value=is_sel, key=sel_key, label_visibility="collapsed"):
-                                    selected_account_ids.append(acc_id)
-                                    selected_platforms.add(platform)
-                        # Spacer column stays empty
-
-                        if len(filtered_accounts) > max_acc:
-                            with st.expander(f"+{len(filtered_accounts) - max_acc} more"):
-                                extra_widths = [1] * min(len(filtered_accounts) - max_acc, 10) + [max(1, 10 - min(len(filtered_accounts) - max_acc, 10))]
-                                extra_cols = st.columns(extra_widths)
-                                for idx, acc in enumerate(filtered_accounts[max_acc:max_acc + 10]):
-                                    acc_id = acc.get("id")
-                                    platform = acc.get("platform", "unknown")
-                                    username = acc.get("username", "compte")
-                                    icon = PLATFORM_ICONS.get(platform, "📱")
-                                    sel_key = f"pub_sel_{acc_id}"
-                                    with extra_cols[idx]:
-                                        if st.checkbox(f"{icon} @{username[:10]}", value=st.session_state.get(sel_key, False), key=sel_key):
-                                            selected_account_ids.append(acc_id)
-                                            selected_platforms.add(platform)
-                    else:
-                        st.info("No accounts for this platform.")
-
-                    # ── TWO-COLUMN LAYOUT ──
-                    col_left, col_right = st.columns([2, 1])
-                    selected_video_path = None
-
-                    with col_left:
-                        # ── MEDIA UPLOAD ZONE ──
-                        video_source = st.radio(
-                            "Source", ["📁 Variations", "📤 Upload"],
-                            key="pub_source", horizontal=True, label_visibility="collapsed"
-                        )
-
-                        if video_source == "📁 Variations":
-                            if os.path.exists(output_dir):
-                                all_mp4 = sorted(Path(output_dir).rglob("*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
-                                if all_mp4:
-                                    video_options = {f"{p.parent.name}/{p.name}": str(p) for p in all_mp4[:50]}
-                                    selected_label = st.selectbox("Vidéo", list(video_options.keys()), key="pub_video_select", label_visibility="collapsed")
-                                    selected_video_path = video_options.get(selected_label)
-                                else:
-                                    st.info("No variations yet. Generate videos first.")
-                            else:
-                                st.info("No variations found.")
-                        else:
-                            uploaded_pub = st.file_uploader("Upload", type=['mp4', 'mov'], key="pub_upload", label_visibility="collapsed")
-                            if uploaded_pub:
-                                with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp:
-                                    tmp.write(uploaded_pub.read())
-                                    selected_video_path = tmp.name
-
-                        # ── MAIN CAPTION ──
-                        st.markdown('<p class="pb-section-title" style="margin-top:16px">Main Caption</p>', unsafe_allow_html=True)
-                        default_caption = st.text_area("Main Caption", key="pub_default_caption", height=150, placeholder="Start writing your post here...", label_visibility="collapsed")
-                        char_count = len(default_caption)
-                        st.markdown(f'<p class="pb-caption-counter">{char_count}/2200</p>', unsafe_allow_html=True)
-
-                        # ── POST CONFIGURATIONS & TOOLS ──
-                        st.markdown('<p class="pb-section-title" style="margin-top:16px">Post configurations & tools</p>', unsafe_allow_html=True)
-
-                        # Initialize config vars with defaults
-                        tt_draft = False
-                        tt_ai_content = False
-                        tt_privacy = "Public"
-                        tt_comments = True
-                        tt_duet = True
-                        tt_stitch = True
-                        tt_branded = False
-                        tt_promote = False
-                        ig_trial = False
-                        ig_share_feed = True
-                        ig_comment_off = False
-
-                        # Dynamic: show TikTok Config only if TikTok accounts selected
-                        if "tiktok" in selected_platforms:
-                            with st.expander("🎵 TikTok Config"):
-                                tt_draft = st.toggle("Send to TikTok as Draft", key="pub_tt_draft", value=False,
-                                                     help="Post will be saved as draft inside of TikTok instead of publishing immediately.")
-                                tt_ai_content = st.toggle("Mark as AI-Generated Content", key="pub_tt_ai", value=False,
-                                                          help="The video will be labeled with 'Creator labeled as AI-generated' tag.")
-                                tt_privacy = st.selectbox("Privacy Setting", ["Public", "Friends", "Private"], key="pub_tt_privacy")
-                                tt_comments = st.toggle("Allow Comments", key="pub_tt_comments", value=True,
-                                                        help="Viewers can comment on this post")
-                                tt_duet = st.toggle("Allow Duet", key="pub_tt_duet", value=True,
-                                                    help="Others can duet with this video")
-                                tt_stitch = st.toggle("Allow Stitch", key="pub_tt_stitch", value=True,
-                                                      help="Others can stitch with this video")
-                                tt_branded = st.toggle("Disclose Branded Content", key="pub_tt_branded", value=False,
-                                                       help="Indicate if this content is a paid partnership")
-                                tt_promote = st.toggle("Promote Your Own Brand", key="pub_tt_promote", value=False,
-                                                       help="Indicate if you're promoting your own brand or product")
-
-                        # Dynamic: show Instagram Config only if Instagram accounts selected
-                        if "instagram" in selected_platforms:
-                            with st.expander("📸 Instagram Config"):
-                                ig_trial = st.toggle("Trial Reel", key="pub_ig_trial", value=False,
-                                                     help="Post as a trial reel (only visible to non-followers)")
-                                ig_share_feed = st.toggle("Share to Feed", key="pub_ig_feed", value=True,
-                                                          help="Share this reel to your main feed")
-                                ig_comment_off = st.toggle("Disable Comments", key="pub_ig_nocomment", value=False,
-                                                           help="Disable comments on this post")
-
-                    with col_right:
-                        # ── SCHEDULE POST (top of right column, like PostBridge) ──
-                        schedule_on = st.toggle("Schedule post", key="pub_schedule_toggle")
-                        scheduled_at = None
-                        if schedule_on:
-                            sched_cols = st.columns(2)
-                            with sched_cols[0]:
-                                pub_date = st.date_input("Date", key="pub_date")
-                            with sched_cols[1]:
-                                pub_time = st.time_input("Time", key="pub_time")
-                            scheduled_at = f"{pub_date}T{pub_time}:00Z"
-
-                        # ── ACTION BUTTONS ──
-                        can_publish = selected_video_path and selected_account_ids
-                        btn_label = "📅 Schedule" if schedule_on else "✈ Post now"
-
-                        if st.button(btn_label, type="primary", key="pub_go", use_container_width=True, disabled=not can_publish):
-                            if not default_caption.strip():
-                                st.error("Add a caption first.")
-                            else:
-                                # Build platform configs from toggle states
-                                platform_configs = {}
-                                if "tiktok" in selected_platforms:
-                                    tt_cfg = {}
-                                    if tt_draft:
-                                        tt_cfg["send_to_draft"] = True
-                                    if tt_ai_content:
-                                        tt_cfg["ai_generated"] = True
-                                    if tt_privacy != "Public":
-                                        tt_cfg["privacy_level"] = tt_privacy.lower()
-                                    if not tt_comments:
-                                        tt_cfg["disable_comment"] = True
-                                    if not tt_duet:
-                                        tt_cfg["disable_duet"] = True
-                                    if not tt_stitch:
-                                        tt_cfg["disable_stitch"] = True
-                                    if tt_branded:
-                                        tt_cfg["branded_content"] = True
-                                    if tt_promote:
-                                        tt_cfg["brand_organic"] = True
-                                    if tt_cfg:
-                                        platform_configs["tiktok"] = tt_cfg
-                                if "instagram" in selected_platforms:
-                                    ig_cfg = {}
-                                    if ig_trial:
-                                        ig_cfg["trial_reel"] = True
-                                    if not ig_share_feed:
-                                        ig_cfg["share_to_feed"] = False
-                                    if ig_comment_off:
-                                        ig_cfg["disable_comments"] = True
-                                    if ig_cfg:
-                                        platform_configs["instagram"] = ig_cfg
-
-                                with st.spinner("Uploading video..."):
-                                    try:
-                                        media_id = upload_video(api_key, selected_video_path)
-                                    except Exception as e:
-                                        st.error(f"Upload error: {e}")
-                                        media_id = None
-
-                                if media_id:
-                                    with st.spinner("Publishing..."):
-                                        try:
-                                            result = create_post(
-                                                api_key=api_key,
-                                                caption=default_caption.strip(),
-                                                media_ids=[media_id],
-                                                account_ids=selected_account_ids,
-                                                scheduled_at=scheduled_at,
-                                                platform_configs=platform_configs if platform_configs else None,
-                                            )
-                                            post_status = result.get("status", "processing")
-                                            post_id = result.get("id", "")
-                                            st.session_state['last_post_id'] = post_id
-                                            if post_status == "scheduled":
-                                                st.success("📅 Scheduled!")
-                                            elif post_status == "posted":
-                                                st.success("🚀 Posted!")
-                                            else:
-                                                st.info("⏳ Processing...")
-                                        except Exception as e:
-                                            st.error(f"Error: {e}")
-
-                        if st.button("💾 Save to Drafts", key="pub_draft", use_container_width=True, disabled=not can_publish):
-                            st.info("Draft saved locally.")
-
-                        if not can_publish:
-                            if not selected_video_path:
-                                st.caption("⚠ Select a video to post")
-                            elif not selected_account_ids:
-                                st.caption("⚠ Select an account to post to")
-
-                        st.markdown("")
-
-                        # ── MEDIA PREVIEW (below actions, like PostBridge) ──
-                        st.markdown('<div class="pb-media-preview-box">', unsafe_allow_html=True)
-                        st.markdown('<p class="pb-section-title">Media Preview</p>', unsafe_allow_html=True)
-                        if selected_video_path and os.path.exists(selected_video_path):
-                            st.video(selected_video_path, format="video/mp4")
-                            st.caption(Path(selected_video_path).name)
-                        else:
-                            st.markdown('<div style="padding:30px 0;text-align:center;color:#48484A;font-size:0.85rem">No media selected</div>', unsafe_allow_html=True)
-                        st.markdown('</div>', unsafe_allow_html=True)
-
-                    # ── RECENT POST RESULTS ──
-                    if st.session_state.get('last_post_id'):
-                        st.markdown("---")
-                        st.markdown('<p class="pb-section-title" style="font-weight:600">Recent post</p>', unsafe_allow_html=True)
-                        try:
-                            post_results = get_post_results(api_key, st.session_state['last_post_id'])
-                            for r in post_results.get("data", []):
-                                success = r.get("success", False)
-                                platform_data = r.get("platform_data", {})
-                                url = platform_data.get("url", "")
-                                acc_id = r.get("social_account_id")
-                                acc_info = next((a for a in accounts if a.get("id") == acc_id), {})
-                                platform = acc_info.get("platform", "?")
-                                username = acc_info.get("username", "?")
-                                icon = PLATFORM_ICONS.get(platform, "📱")
-                                status_class = "pub-posted" if success else "pub-failed"
-                                status_text = "Posted" if success else r.get("error", "Error")
-                                st.markdown(f"""<div class="pub-result-card">
-                                    <div style="display:flex;justify-content:space-between;align-items:center">
-                                        <span style="color:#F5F5F7">{icon} @{username}</span>
-                                        <span class="pub-status {status_class}">{status_text}</span>
-                                    </div>
-                                    {"<a href='" + url + "' target='_blank' style='color:#007AFF;font-size:0.8rem'>View ↗</a>" if url else ""}
-                                </div>""", unsafe_allow_html=True)
-                        except Exception:
-                            st.caption("Loading...")
-
-            except ImportError:
-                st.error("Module postbridge introuvable.")
-            except Exception as e:
-                error_msg = str(e)
-                if "401" in error_msg or "403" in error_msg:
-                    st.error("🔑 Invalid API key.")
-                elif "Connection" in error_msg or "Timeout" in error_msg:
-                    st.error("🌐 Connection error.")
-                else:
-                    st.error(f"Error: {e}")
-
     # ========== TAB 3: STATS ==========
     with tab3:
-        st.markdown("### 📊 Statistiques globales")
+        st.markdown("### 📊 Statistiques")
 
         if os.path.exists(output_dir):
             all_videos = list(Path(output_dir).rglob("*.mp4"))
