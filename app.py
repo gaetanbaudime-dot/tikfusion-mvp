@@ -1,6 +1,6 @@
 """
-TikFusion v3 — Professional video uniquifier
-Import URL | Score de Viralité | Analyse Captions
+TikFusion v5 — Professional video uniquifier
+Import URL | Single | Bulk | Ferme | Statistiques | Configuration
 """
 import streamlit as st
 import os
@@ -70,7 +70,7 @@ st.markdown("""
     .badge-warning { background: #FF9F0A; color: white; padding: 3px 10px; border-radius: 20px; font-weight: 600; font-size: 0.8rem; }
     .badge-danger { background: #FF453A; color: white; padding: 3px 10px; border-radius: 20px; font-weight: 600; font-size: 0.8rem; }
 
-    /* Result grid */
+    /* Result grid — reordered: # | Score | Modifications | Apercu */
     .rg-table { width: 100%; border-collapse: separate; border-spacing: 0 3px; }
     .rg-head td {
         padding: 4px 10px; font-size: 0.68rem; font-weight: 600; color: #48484A;
@@ -83,9 +83,9 @@ st.markdown("""
     .rg-row td:last-child { border-radius: 0 10px 10px 0; }
     .rg-row:hover td { background: #232325; }
     .rg-name { font-weight: 700; font-size: 0.85rem; color: #F5F5F7; white-space: nowrap; }
-    .rg-tags { line-height: 1.6; }
-    .rg-score { text-align: center; white-space: nowrap; }
-    .rg-thumb { height: 80px; border-radius: 6px; object-fit: cover; }
+    .rg-tags { line-height: 1.8; display: inline-flex; flex-wrap: wrap; gap: 2px; max-width: 340px; }
+    .rg-score { text-align: left; white-space: nowrap; }
+    .rg-thumb { height: 110px; border-radius: 6px; object-fit: cover; }
 
     /* Summary bar */
     .summary-bar {
@@ -117,6 +117,13 @@ st.markdown("""
     .vir-tips { margin-top: 8px; padding: 8px; background: #2C2C2E; border-radius: 8px; color: #FF9F0A; font-size: 0.68rem; }
     .vir-why { margin-top: 8px; padding: 8px; background: #0A2F1C; border: 1px solid #30D158; border-radius: 8px; color: #30D158; font-size: 0.7rem; }
 
+    /* Engagement stat chips */
+    .eng-chip {
+        display: inline-block; background: #2C2C2E; border-radius: 8px;
+        padding: 6px 12px; font-size: 0.78rem; color: #F5F5F7; font-weight: 500;
+    }
+    .eng-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+
     /* Platform badges */
     .plat { display: inline-block; padding: 3px 10px; border-radius: 6px; font-size: 0.72rem; font-weight: 600; }
     .plat-tiktok { background: #1C1C1E; color: #FF004F; border: 1px solid #FF004F; }
@@ -144,6 +151,24 @@ st.markdown("""
 
     /* Expander */
     .streamlit-expanderHeader { background: #1C1C1E; border-radius: 10px; font-size: 0.85rem; }
+
+    /* Info card for Config */
+    .info-card {
+        background: #1C1C1E; border: 1px solid #2C2C2E; border-radius: 14px;
+        padding: 16px; margin: 10px 0;
+    }
+    .info-card h4 { color: #F5F5F7; margin: 0 0 8px 0; }
+    .info-card p { color: #86868B; font-size: 0.82rem; margin: 4px 0; }
+    .info-card .highlight { color: #F5F5F7; font-weight: 600; }
+    .info-card .step { color: #86868B; font-size: 0.78rem; line-height: 1.8; }
+
+    /* Farm progress */
+    .farm-metric {
+        background: #1C1C1E; border: 1px solid #2C2C2E; border-radius: 12px;
+        padding: 12px; text-align: center;
+    }
+    .farm-metric .value { font-size: 1.4rem; font-weight: 700; color: #F5F5F7; }
+    .farm-metric .label { font-size: 0.7rem; color: #86868B; margin-top: 2px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -194,19 +219,23 @@ def format_tags(mods):
 
 
 def get_badge(score):
-    if score >= 60: return 'badge-safe'
-    if score >= 30: return 'badge-warning'
-    return 'badge-danger'
+    """Badges calibres Instagram — la plateforme la plus stricte"""
+    if score >= 60:
+        return 'badge-safe', 'Safe Instagram'
+    if score >= 30:
+        return 'badge-warning', 'Safe TikTok'
+    return 'badge-danger', 'Risque'
 
 
 def extract_thumbnail(video_path):
     thumb = video_path + ".thumb.jpg"
     if os.path.exists(thumb): return thumb
     try:
-        subprocess.run(["ffmpeg","-y","-i",video_path,"-vf","thumbnail,scale=120:-1",
+        subprocess.run(["ffmpeg","-y","-i",video_path,"-vf","thumbnail,scale=160:-1",
                         "-frames:v","1","-q:v","5",thumb], capture_output=True, timeout=10)
         return thumb if os.path.exists(thumb) else None
-    except: return None
+    except Exception:
+        return None
 
 
 def thumb_b64(path):
@@ -244,7 +273,7 @@ def download_from_url(url):
         files = [f for f in os.listdir(tmpdir) if os.path.isfile(os.path.join(tmpdir, f))]
         if not files:
             shutil.rmtree(tmpdir, ignore_errors=True)
-            return None, "Aucun fichier téléchargé"
+            return None, "Aucun fichier telecharge"
 
         src = os.path.join(tmpdir, files[0])
         final = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
@@ -257,124 +286,147 @@ def download_from_url(url):
                                 "-preset","ultrafast",final.name], capture_output=True, timeout=120)
             if r.returncode != 0:
                 shutil.rmtree(tmpdir, ignore_errors=True)
-                return None, "Conversion MP4 échouée"
+                return None, "Conversion MP4 echouee"
 
         shutil.rmtree(tmpdir, ignore_errors=True)
         if os.path.exists(final.name) and os.path.getsize(final.name) > 0:
             return final.name, None
         return None, "Fichier vide"
     except subprocess.TimeoutExpired:
-        return None, "Timeout — vidéo trop longue"
+        return None, "Timeout — video trop longue"
     except Exception as e:
         return None, str(e)
 
 
-# ============ VIRALITY ANALYSIS ============
+# ============ ENGAGEMENT SCRAPING (Import URL only) ============
 
-def analyze_virality(video_path):
-    info = {}
+def scrape_engagement_stats(url):
+    """Scrape les stats d'engagement depuis l'URL source via yt-dlp --dump-json"""
     try:
-        r = subprocess.run(["ffprobe","-v","quiet","-print_format","json",
-                            "-show_format","-show_streams",video_path],
-                           capture_output=True, text=True, timeout=30)
-        info = json.loads(r.stdout) if r.returncode == 0 else {}
-    except: pass
+        cmd = [sys.executable, "-m", "yt_dlp", "--dump-json", "--no-download", url]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        if result.returncode != 0:
+            return None, "Impossible de scraper les stats"
+
+        data = json.loads(result.stdout)
+
+        return {
+            'views': data.get('view_count', 0) or 0,
+            'likes': data.get('like_count', 0) or 0,
+            'comments': data.get('comment_count', 0) or 0,
+            'shares': data.get('repost_count', 0) or data.get('share_count', 0) or 0,
+            'title': data.get('title', '') or '',
+            'uploader': data.get('uploader', '') or data.get('channel', '') or '',
+            'duration': data.get('duration', 0) or 0,
+            'description': data.get('description', '') or '',
+        }, None
+    except subprocess.TimeoutExpired:
+        return None, "Timeout scraping"
+    except Exception as e:
+        return None, str(e)
+
+
+def calculate_virality_score(stats):
+    """Score de viralite base sur l'engagement reel scrape"""
+    views = max(stats['views'], 1)
+    likes = stats['likes']
+    comments = stats['comments']
+    shares = stats['shares']
+
+    engagement_rate = (likes + comments + shares) / views
+    like_ratio = likes / views
+    comment_ratio = comments / views
 
     score = 0
     breakdown = []
     tips = []
     why = []
 
-    # Duration (25 pts)
-    try: duration = float(info.get('format',{}).get('duration',0))
-    except: duration = 0
-
-    if 7 <= duration <= 15:
-        pts = 25; breakdown.append(("⏱️ Durée", f"{duration:.0f}s — hook court", pts, 25))
-        why.append("Durée idéale pour un hook viral (7-15s = rétention max)")
-    elif 15 < duration <= 30:
-        pts = 22; breakdown.append(("⏱️ Durée", f"{duration:.0f}s — optimal", pts, 25))
-        why.append("Durée optimale TikTok — assez court pour garder l'attention")
-    elif 30 < duration <= 60:
-        pts = 18; breakdown.append(("⏱️ Durée", f"{duration:.0f}s — Reels", pts, 25))
-    elif duration > 60:
-        pts = 8; breakdown.append(("⏱️ Durée", f"{duration:.0f}s — long", pts, 25))
-        tips.append("Couper à <30s pour maximiser la rétention")
+    # 1. Vues (30 pts)
+    if views >= 1_000_000:
+        pts = 30; why.append(f"{views:,} vues — contenu massif, viralite confirmee")
+    elif views >= 100_000:
+        pts = 25; why.append(f"{views:,} vues — forte portee organique")
+    elif views >= 10_000:
+        pts = 18
+    elif views >= 1_000:
+        pts = 10
     else:
-        pts = 5; breakdown.append(("⏱️ Durée", "Inconnue", pts, 25))
+        pts = 3; tips.append("Portee faible (<1K vues) — tester d'autres hooks")
+    breakdown.append(("👁 Vues", f"{views:,}", pts, 30))
     score += pts
 
-    # Format (20 pts)
-    vs = None; aus = None
-    for s in info.get('streams', []):
-        if s.get('codec_type') == 'video' and not vs: vs = s
-        if s.get('codec_type') == 'audio' and not aus: aus = s
-
-    if vs:
-        w, h = int(vs.get('width',0)), int(vs.get('height',0))
-        if h > w and h >= 1920:
-            pts = 20; breakdown.append(("📐 Format", f"{w}x{h} — vertical HD", pts, 20))
-            why.append("Format 9:16 vertical HD — plein écran sur mobile")
-        elif h > w:
-            pts = 15; breakdown.append(("📐 Format", f"{w}x{h} — vertical", pts, 20))
-            tips.append("Passer en 1080x1920 pour qualité max")
-        elif w == h:
-            pts = 10; breakdown.append(("📐 Format", f"{w}x{h} — carré", pts, 20))
-            tips.append("Format vertical (9:16) recommandé")
-        else:
-            pts = 5; breakdown.append(("📐 Format", f"{w}x{h} — horizontal", pts, 20))
-            tips.append("Recadrer en vertical pour Reels/TikTok")
-        score += pts
+    # 2. Engagement rate (30 pts)
+    if engagement_rate >= 0.10:
+        pts = 30; why.append(f"Engagement {engagement_rate*100:.1f}% — exceptionnel (>10%)")
+    elif engagement_rate >= 0.05:
+        pts = 24; why.append(f"Engagement {engagement_rate*100:.1f}% — tres bon (>5%)")
+    elif engagement_rate >= 0.02:
+        pts = 16
+    elif engagement_rate >= 0.01:
+        pts = 8
     else:
-        score += 5; breakdown.append(("📐 Format", "Non détecté", 5, 20))
-
-    # Audio (20 pts)
-    if aus:
-        pts = 20; breakdown.append(("🔊 Audio", "Présent", pts, 20))
-        why.append("Audio présent — essentiel pour l'engagement (+70% de rétention)")
-    else:
-        pts = 2; breakdown.append(("🔊 Audio", "Absent", pts, 20))
-        tips.append("Ajouter audio (musique trending ou voiceover)")
+        pts = 2; tips.append("Engagement rate faible — ameliorer le hook d'accroche")
+    breakdown.append(("🔥 Engagement", f"{engagement_rate*100:.2f}%", pts, 30))
     score += pts
 
-    # Bitrate (15 pts)
-    try:
-        br = int(info.get('format',{}).get('bit_rate',0)) / 1000
-        if br >= 5000: pts = 15; breakdown.append(("🎬 Qualité", f"{br:.0f}kbps", pts, 15))
-        elif br >= 2000: pts = 12; breakdown.append(("🎬 Qualité", f"{br:.0f}kbps", pts, 15))
-        elif br >= 1000: pts = 8; breakdown.append(("🎬 Qualité", f"{br:.0f}kbps", pts, 15))
-        else: pts = 4; breakdown.append(("🎬 Qualité", f"{br:.0f}kbps", pts, 15)); tips.append("Augmenter le bitrate")
-        score += pts
-    except: score += 5; breakdown.append(("🎬 Qualité", "?", 5, 15))
+    # 3. Like ratio (20 pts)
+    if like_ratio >= 0.08:
+        pts = 20; why.append(f"Like ratio {like_ratio*100:.1f}% — le contenu plait beaucoup")
+    elif like_ratio >= 0.04:
+        pts = 15
+    elif like_ratio >= 0.02:
+        pts = 10
+    else:
+        pts = 4
+    breakdown.append(("❤️ Likes", f"{likes:,} ({like_ratio*100:.1f}%)", pts, 20))
+    score += pts
 
-    # FPS (10 pts)
-    if vs:
-        try:
-            n, d = vs.get('r_frame_rate','30/1').split('/')
-            fps = int(n) / max(int(d), 1)
-            if fps >= 30: pts = 10; breakdown.append(("🎞️ FPS", f"{fps:.0f}", pts, 10))
-            elif fps >= 24: pts = 7; breakdown.append(("🎞️ FPS", f"{fps:.0f}", pts, 10))
-            else: pts = 3; breakdown.append(("🎞️ FPS", f"{fps:.0f}", pts, 10)); tips.append("Filmer en 30fps+")
-            score += pts
-        except: score += 5; breakdown.append(("🎞️ FPS", "?", 5, 10))
+    # 4. Comment ratio (20 pts) — signal fort de viralite
+    if comment_ratio >= 0.02:
+        pts = 20; why.append(f"Comment ratio {comment_ratio*100:.2f}% — declenche la conversation")
+    elif comment_ratio >= 0.005:
+        pts = 14
+    elif comment_ratio >= 0.001:
+        pts = 8
+    else:
+        pts = 2; tips.append("Peu de commentaires — ajouter un CTA pour inciter le debat")
+    breakdown.append(("💬 Commentaires", f"{comments:,} ({comment_ratio*100:.2f}%)", pts, 20))
+    score += pts
 
-    # Size (10 pts)
-    try:
-        sz = os.path.getsize(video_path) / (1024*1024)
-        if sz <= 10: pts = 10; breakdown.append(("📦 Taille", f"{sz:.1f}MB", pts, 10))
-        elif sz <= 50: pts = 7; breakdown.append(("📦 Taille", f"{sz:.1f}MB", pts, 10))
-        else: pts = 3; breakdown.append(("📦 Taille", f"{sz:.1f}MB", pts, 10)); tips.append("Compresser la vidéo")
-        score += pts
-    except: score += 5; breakdown.append(("📦 Taille", "?", 5, 10))
-
-    return {'score': min(score, 100), 'breakdown': breakdown, 'tips': tips, 'why': why,
-            'duration': duration, 'has_audio': aus is not None,
-            'resolution': f"{vs.get('width','?')}x{vs.get('height','?')}" if vs else "?"}
+    return {
+        'score': min(score, 100),
+        'breakdown': breakdown,
+        'tips': tips,
+        'why': why,
+        'stats': stats,
+        'engagement_rate': engagement_rate,
+    }
 
 
 def render_virality(analysis):
+    """Render le score de viralite base sur l'engagement"""
     s = analysis['score']
-    b = get_badge(s)
+    badge_class, badge_label = get_badge(s)
+    stats = analysis.get('stats', {})
+
+    # Chips de stats brutes
+    chips_html = '<div class="eng-chips">'
+    if stats.get('views', 0) > 0:
+        chips_html += f'<span class="eng-chip">👁 {stats["views"]:,} vues</span>'
+    if stats.get('likes', 0) > 0:
+        chips_html += f'<span class="eng-chip">❤️ {stats["likes"]:,} likes</span>'
+    if stats.get('comments', 0) > 0:
+        chips_html += f'<span class="eng-chip">💬 {stats["comments"]:,} commentaires</span>'
+    if stats.get('shares', 0) > 0:
+        chips_html += f'<span class="eng-chip">🔄 {stats["shares"]:,} partages</span>'
+    chips_html += '</div>'
+
+    # Uploader info
+    uploader = stats.get('uploader', '')
+    uploader_html = f'<div style="color:#86868B;font-size:0.72rem;margin-bottom:8px">👤 {uploader}</div>' if uploader else ''
+
+    # Breakdown bars
     rows = ""
     for label, desc, pts, mx in analysis['breakdown']:
         pct = (pts/mx*100) if mx else 0
@@ -390,51 +442,100 @@ def render_virality(analysis):
     why = ""
     if analysis['why']:
         items = "".join(f"<div>✅ {w}</div>" for w in analysis['why'])
-        why = f'<div class="vir-why"><div style="font-weight:600;margin-bottom:4px">Pourquoi ça marche :</div>{items}</div>'
+        why = f'<div class="vir-why"><div style="font-weight:600;margin-bottom:4px">Pourquoi ca marche :</div>{items}</div>'
 
     return f"""<div class="vir-card"><div class="vir-head">
-        <span class="vir-title">🔥 Score de Viralité</span>
-        <span class="{b}" style="font-size:1rem;padding:5px 14px">{s}/100</span>
-    </div>{rows}{why}{tips}</div>"""
+        <span class="vir-title">🔥 Score de Viralite</span>
+        <span class="{badge_class}" style="font-size:1rem;padding:5px 14px">{s}/100</span>
+    </div>{uploader_html}{chips_html}{rows}{why}{tips}</div>"""
 
 
-# ============ CAPTION GENERATION ============
+# ============ CAPTION OCR + GENERATION ============
 
-def generate_captions(duration=0):
+def generate_captions_from_ocr(video_path):
+    """Extraire le texte via OCR et generer 10 variantes de captions (texte SUR la video)"""
+    original_texts = []
+    try:
+        from caption_ocr import extract_text_from_video
+        original_texts = extract_text_from_video(video_path, num_frames=8)
+    except Exception:
+        pass
+
+    if original_texts:
+        # Extraire les mots-cles du texte OCR
+        words = []
+        for t in original_texts:
+            for w in t.split():
+                w_clean = w.strip('.,!?;:()[]"\'')
+                if len(w_clean) > 3 and w_clean.isalpha():
+                    words.append(w_clean)
+        topic = " ".join(words[:4]) if words else "ca"
+
+        templates = [
+            f"Personne ne parle de {topic} mais...",
+            f"La verite sur {topic}",
+            f"{topic} — ce que tu rates",
+            f"POV: tu decouvres {topic}",
+            f"Stop scroll — {topic}",
+            f"Le secret de {topic}",
+            f"{topic} change tout",
+            f"Fais ca avec {topic}",
+            f"{topic} avant qu'il soit trop tard",
+            f"Tu ne savais pas ca sur {topic}",
+        ]
+        return templates, original_texts
+    else:
+        generic = [
+            "Regarde ca de plus pres...",
+            "Ce detail change tout",
+            "Personne ne remarque ca",
+            "POV: tu vois ca pour la premiere fois",
+            "Attends la fin...",
+            "Le moment ou tout bascule",
+            "Ce que personne ne te dit",
+            "Stop le scroll — regarde",
+            "3 secondes qui changent tout",
+            "Tu passes a cote si tu scrolles",
+        ]
+        return generic, []
+
+
+def generate_descriptions(duration=0):
+    """Generer 10 variantes de descriptions (texte SOUS la video) — hooks + CTA + hashtags"""
     hooks_curiosite = [
-        "Personne ne parle de ça mais...",
+        "Personne ne parle de ca mais...",
         "Ce que personne ne te dit sur...",
-        "La vérité que tout le monde ignore",
+        "La verite que tout le monde ignore",
         "Tu ne devineras jamais ce qui se passe",
         "Le secret que les pros cachent",
     ]
     hooks_valeur = [
         "3 astuces que j'utilise tous les jours",
-        "Fais ça et remercie-moi plus tard",
-        "La méthode qui a tout changé pour moi",
-        "L'astuce que j'aurais aimé connaître avant",
+        "Fais ca et remercie-moi plus tard",
+        "La methode qui a tout change pour moi",
+        "L'astuce que j'aurais aime connaitre avant",
         "Voici comment faire en 30 secondes",
     ]
     hooks_emotion = [
-        "Ça m'a laissé sans voix...",
-        "Quand tu réalises que...",
-        "POV: tu découvres ça pour la première fois",
-        "Avant vs Après — la différence est folle",
-        "Le moment où tout a basculé",
+        "Ca m'a laisse sans voix...",
+        "Quand tu realises que...",
+        "POV: tu decouvres ca pour la premiere fois",
+        "Avant vs Apres — la difference est folle",
+        "Le moment ou tout a bascule",
     ]
     hooks_urgence = [
-        "Sauvegarde avant que ça disparaisse",
-        "Stop le scroll — regarde ça",
-        "Si tu vois cette vidéo c'est un signe",
+        "Sauvegarde avant que ca disparaisse",
+        "Stop le scroll — regarde ca",
+        "Si tu vois cette video c'est un signe",
         "Ne rate pas la fin surtout",
-        "Tu passes à côté si tu scrolles",
+        "Tu passes a cote si tu scrolles",
     ]
     ctas = [
         "Follow pour plus 🔥",
         "Like si tu veux la partie 2",
-        "Commente 🔥 si ça t'a aidé",
+        "Commente 🔥 si ca t'a aide",
         "Enregistre pour plus tard 📌",
-        "Partage à quelqu'un qui en a besoin",
+        "Partage a quelqu'un qui en a besoin",
         "Abonne-toi pour la suite",
         "Dis-moi en commentaire ce que t'en penses",
     ]
@@ -446,7 +547,6 @@ def generate_captions(duration=0):
         "#reels #explore #trending #content",
     ]
 
-    # Take 2-3 from each category for variety
     pool = (random.sample(hooks_curiosite, 2) + random.sample(hooks_valeur, 3) +
             random.sample(hooks_emotion, 2) + random.sample(hooks_urgence, 3))
     random.shuffle(pool)
@@ -459,9 +559,9 @@ def generate_captions(duration=0):
         if duration and duration <= 15:
             v = f"{hook}\n\n{cta}\n\n{tag}"
         elif duration and duration <= 45:
-            v = f"{hook}\n\n💡 Regarde jusqu'à la fin\n\n{cta}\n\n{tag}"
+            v = f"{hook}\n\n💡 Regarde jusqu'a la fin\n\n{cta}\n\n{tag}"
         else:
-            v = f"{hook}\n\n⬇️ Tout est dans la vidéo\n\n{cta}\n\n{tag}"
+            v = f"{hook}\n\n⬇️ Tout est dans la video\n\n{cta}\n\n{tag}"
         variants.append(v)
     return variants
 
@@ -493,7 +593,40 @@ def run_generation(input_path, num_vars, output_dir, intensity, enabled_mods, pr
 
 # ============ RESULTS RENDERER ============
 
-def render_results(analyses, folder, prefix, virality=None, captions=None):
+def build_grid_html(analyses):
+    """Construire le tableau HTML — colonnes: # | Score | Modifications | Apercu"""
+    grid = '<table class="rg-table"><tr class="rg-head"><td style="width:36px">#</td><td style="width:56px">Score</td><td>Modifications</td><td style="width:120px">Apercu</td></tr>'
+
+    for a in analyses:
+        u = a['uniqueness']
+        badge_class, badge_label = get_badge(u)
+        tags_html = format_tags(a.get('modifications', {}))
+
+        # Thumbnail as base64
+        thumb_img = '<span style="color:#48484A;font-size:.7rem">—</span>'
+        t = a.get('thumbnail')
+        if not t or not os.path.exists(t):
+            t_path = a.get('output_path', '')
+            if t_path and os.path.exists(t_path):
+                t = extract_thumbnail(t_path)
+        if t and os.path.exists(t):
+            b64 = thumb_b64(t)
+            if b64:
+                thumb_img = f'<img src="data:image/jpeg;base64,{b64}" class="rg-thumb" />'
+
+        grid += f"""<tr class="rg-row">
+            <td><span class="rg-name">{a['name']}</span></td>
+            <td class="rg-score"><span class="{badge_class}" style="font-size:0.72rem;padding:2px 8px">{u:.0f}%</span></td>
+            <td><div class="rg-tags">{tags_html}</div></td>
+            <td style="text-align:center">{thumb_img}</td>
+        </tr>\n"""
+
+    grid += '</table>'
+    return grid
+
+
+def render_results(analyses, folder, prefix, virality=None, captions_overlay=None, original_texts=None, descriptions=None):
+    """Afficher les resultats de generation"""
     if not analyses:
         return
 
@@ -521,39 +654,12 @@ def render_results(analyses, folder, prefix, virality=None, captions=None):
                            file_name=f"{folder}.zip", mime="application/zip",
                            key=f"zip_{prefix}", use_container_width=True)
 
-    st.markdown("""<div class="legend">🟢 ≥60% = Safe TikTok+Instagram &nbsp;|&nbsp; 🟠 30-59% = Safe TikTok &nbsp;|&nbsp; 🔴 <30% = Risque</div>""", unsafe_allow_html=True)
+    st.markdown("""<div class="legend">🟢 ≥60% = Safe Instagram (toutes plateformes) &nbsp;|&nbsp; 🟠 30-59% = Safe TikTok seulement &nbsp;|&nbsp; 🔴 <30% = Risque detection</div>""", unsafe_allow_html=True)
 
-    # Build HTML table grid (name + tags + score + thumbnail) — all in ONE block
-    grid_html = '<table class="rg-table"><tr class="rg-head"><td style="width:36px">#</td><td>Modifications</td><td style="width:56px">Score</td><td style="width:90px">Aperçu</td></tr>'
+    # HTML table grid
+    st.markdown(build_grid_html(analyses), unsafe_allow_html=True)
 
-    for a in analyses:
-        u = a['uniqueness']
-        badge = get_badge(u)
-        tags_html = format_tags(a.get('modifications', {}))
-
-        # Thumbnail as base64
-        thumb_img = '<span style="color:#48484A;font-size:.7rem">—</span>'
-        t = a.get('thumbnail')
-        if not t or not os.path.exists(t):
-            t_path = a.get('output_path', '')
-            if t_path and os.path.exists(t_path):
-                t = extract_thumbnail(t_path)
-        if t and os.path.exists(t):
-            b64 = thumb_b64(t)
-            if b64:
-                thumb_img = f'<img src="data:image/jpeg;base64,{b64}" class="rg-thumb" />'
-
-        grid_html += f"""<tr class="rg-row">
-            <td><span class="rg-name">{a['name']}</span></td>
-            <td><span class="rg-tags">{tags_html}</span></td>
-            <td class="rg-score"><span class="{badge}">{u:.0f}%</span></td>
-            <td style="text-align:center">{thumb_img}</td>
-        </tr>\n"""
-
-    grid_html += '</table>'
-    st.markdown(grid_html, unsafe_allow_html=True)
-
-    # Download buttons strip (5 per line, tight)
+    # Download buttons strip (5 per line)
     max_per_row = 5
     for start in range(0, len(analyses), max_per_row):
         chunk = analyses[start:start+max_per_row]
@@ -569,7 +675,7 @@ def render_results(analyses, folder, prefix, virality=None, captions=None):
 
     # Video preview gallery — visible, 3 per row
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-    st.markdown("##### 🎬 Aperçus — vérifier les modifications")
+    st.markdown("##### 🎬 Aperçus — verifier les modifications")
     preview_per_row = 3
     for start in range(0, len(analyses), preview_per_row):
         chunk = analyses[start:start+preview_per_row]
@@ -580,22 +686,33 @@ def render_results(analyses, folder, prefix, virality=None, captions=None):
                 with pcols[i]:
                     st.video(p)
                     u = a['uniqueness']
-                    badge = get_badge(u)
-                    st.markdown(f'<div style="text-align:center;margin-top:-6px"><span class="rg-name">{a["name"]}</span> &nbsp; <span class="{badge}" style="font-size:.72rem;padding:2px 8px">{u:.0f}%</span></div>', unsafe_allow_html=True)
+                    badge_class, _ = get_badge(u)
+                    st.markdown(f'<div style="text-align:center;margin-top:-6px"><span class="rg-name">{a["name"]}</span> &nbsp; <span class="{badge_class}" style="font-size:.72rem;padding:2px 8px">{u:.0f}%</span></div>', unsafe_allow_html=True)
 
-    # Virality
+    # Virality (Import URL only)
     if virality:
         st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
-        with st.expander("🔥 Analyse de Viralité — Pourquoi ça marche", expanded=False):
+        with st.expander("🔥 Analyse de Viralite — Engagement reel", expanded=False):
             st.markdown(render_virality(virality), unsafe_allow_html=True)
 
-    # Captions
-    if captions:
-        with st.expander("📝 10 Variantes de Captions virales", expanded=False):
+    # Captions (texte SUR la video) — OCR-based
+    if captions_overlay:
+        with st.expander("🎬 10 Captions (texte sur la video)", expanded=False):
+            if original_texts:
+                combined = " | ".join(original_texts[:3])
+                st.markdown(f'<div style="background:#2C2C2E;border-radius:8px;padding:8px;margin-bottom:8px;font-size:0.78rem;color:#86868B"><b style="color:#F5F5F7">Texte original detecte :</b> {combined}</div>', unsafe_allow_html=True)
             cap_cols = st.columns(2)
-            for i, cap in enumerate(captions):
+            for i, cap in enumerate(captions_overlay):
                 with cap_cols[i % 2]:
                     st.code(cap, language=None)
+
+    # Descriptions (texte SOUS la video)
+    if descriptions:
+        with st.expander("📝 10 Descriptions (texte sous la video)", expanded=False):
+            desc_cols = st.columns(2)
+            for i, desc in enumerate(descriptions):
+                with desc_cols[i % 2]:
+                    st.code(desc, language=None)
 
 
 # ============ MAIN ============
@@ -606,28 +723,29 @@ def main():
         <span class="header-title">TikFusion</span>
     </div>""", unsafe_allow_html=True)
 
-    tab_url, tab_single, tab_bulk, tab_stats, tab_config = st.tabs([
-        "🔗 Import", "📤 Single", "📦 Bulk", "📊 Stats", "⚙️ Config"
+    tab_url, tab_single, tab_bulk, tab_farm, tab_stats, tab_config = st.tabs([
+        "🔗 Import", "📤 Single", "📦 Bulk", "🏭 Ferme",
+        "📊 Statistiques", "⚙️ Configuration"
     ])
 
-    # ===== CONFIG (first for variables) =====
+    # ===== CONFIGURATION (first for variables) =====
     with tab_config:
         st.markdown("### ⚙️ Configuration")
         c1, c2 = st.columns(2)
         with c1: output_dir = st.text_input("📁 Dossier de sortie", value="outputs", key="cfg_output")
-        with c2: intensity = st.select_slider("🎚️ Intensité", options=["low","medium","high"], value="medium", key="cfg_intensity")
+        with c2: intensity = st.select_slider("🎚️ Intensite", options=["low","medium","high"], value="medium", key="cfg_intensity")
 
         st.markdown("---")
-        st.markdown("### 🎛️ Modifications anti-détection")
+        st.markdown("### 🎛️ Modifications anti-detection")
 
-        st.markdown("#### 👁️ Anti Hash Visuel — *~30-35% de la détection*")
+        st.markdown("#### 👁️ Anti Hash Visuel — *~30-35% de la detection*")
         v1,v2 = st.columns(2)
         with v1:
             mod_noise = st.toggle("📡 Pixel Noise", value=True, key="mod_noise", help="Bruit invisible. Le plus efficace contre pHash.")
-            mod_zoom = st.toggle("🔍 Zoom", value=True, key="mod_zoom", help="Zoom léger. Repositionne les pixels.")
+            mod_zoom = st.toggle("🔍 Zoom", value=True, key="mod_zoom", help="Zoom leger. Repositionne les pixels.")
         with v2:
-            mod_gamma = st.toggle("🌗 Gamma", value=True, key="mod_gamma", help="Modifie la luminosité globale.")
-            mod_hue = st.toggle("🎨 Couleur", value=True, key="mod_hue", help="Décale la teinte.")
+            mod_gamma = st.toggle("🌗 Gamma", value=True, key="mod_gamma", help="Modifie la luminosite globale.")
+            mod_hue = st.toggle("🎨 Couleur", value=True, key="mod_hue", help="Decale la teinte.")
 
         st.markdown("#### 🧠 Anti Deep Learning — *~25-30%*")
         s1,s2 = st.columns(2)
@@ -639,11 +757,11 @@ def main():
 
         st.markdown("#### 🔊 Anti Fingerprint Audio — *~20-25%*")
         a1,a2 = st.columns(2)
-        with a1: mod_pitch = st.toggle("🎵 Pitch", value=True, key="mod_pitch", help="Décale la fréquence audio.")
+        with a1: mod_pitch = st.toggle("🎵 Pitch", value=True, key="mod_pitch", help="Decale la frequence audio.")
         with a2: mod_fps = st.toggle("🎞️ FPS", value=True, key="mod_fps", help="Change le framerate.")
 
         st.markdown("#### 🏷️ Metadata")
-        mod_meta = st.toggle("🏷️ Metadata aléatoires", value=True, key="mod_meta", help="Randomise les métadonnées.")
+        mod_meta = st.toggle("🏷️ Metadata aleatoires", value=True, key="mod_meta", help="Randomise les metadonnees.")
 
         st.markdown("---")
         ps = 0; d = []
@@ -660,13 +778,51 @@ def main():
         if mod_meta: ps += 5; d.append("🏷️+5")
         ps += 8; d.append("💾+8")
         ps = min(ps, 100)
-        bc = get_badge(ps)
+        bc, bl = get_badge(ps)
         st.markdown(f"""<div style="background:#1C1C1E;border:1px solid #2C2C2E;border-radius:12px;padding:14px;margin:8px 0">
             <div style="display:flex;align-items:center;justify-content:space-between">
-                <span style="font-size:1rem;font-weight:600;color:#F5F5F7">📊 Score estimé moyen</span>
-                <span class="{bc}" style="font-size:1.1rem;padding:5px 14px">{ps}%</span>
+                <span style="font-size:1rem;font-weight:600;color:#F5F5F7">📊 Score estime moyen</span>
+                <span class="{bc}" style="font-size:1.1rem;padding:5px 14px">{ps}% — {bl}</span>
             </div>
             <div style="color:#86868B;font-size:.72rem;margin-top:6px">{" · ".join(d)}</div>
+        </div>""", unsafe_allow_html=True)
+
+        # ===== INFO INSTAGRAM =====
+        st.markdown("---")
+        st.markdown("### 🛡️ Detection Instagram — Notre reference")
+        st.markdown("""<div class="info-card">
+            <h4>Pourquoi Instagram est notre reference</h4>
+            <p>Instagram utilise l'algorithme de detection de doublons <span class="highlight">le plus strict</span>
+            parmi toutes les plateformes. Si votre video passe Instagram, elle passera partout (TikTok, YouTube, etc.).</p>
+
+            <div style="margin-top:12px">
+                <div style="color:#E1306C;font-weight:600;font-size:0.85rem;margin-bottom:8px">
+                    5 couches de detection Instagram :
+                </div>
+                <div class="step">
+                    1. <span class="highlight">Perceptual Hashing (pHash)</span> — Compare une empreinte visuelle de chaque frame.
+                    Le <span style="color:#FF6482">noise</span> et le <span style="color:#FFD60A">zoom</span> cassent ce hash.<br>
+                    2. <span class="highlight">Content Matching (Deep Learning)</span> — Reseau de neurones qui reconnait le contenu
+                    meme modifie. Le <span style="color:#FF453A">miroir</span> et le <span style="color:#30D158">crop</span> le perturbent.<br>
+                    3. <span class="highlight">Audio Fingerprinting</span> — Empreinte audio unique.
+                    Le <span style="color:#5E5CE6">pitch shift</span> et le changement de <span style="color:#64D2FF">vitesse</span> la modifient.<br>
+                    4. <span class="highlight">Watermark Detection</span> — Detecte les watermarks TikTok/autres.
+                    Le crop et le re-encoding les suppriment.<br>
+                    5. <span class="highlight">Metadata Analysis</span> — Compare les metadonnees EXIF/MP4.
+                    La <span style="color:#BF5AF2">randomisation meta</span> les remplace.
+                </div>
+            </div>
+
+            <div style="margin-top:12px;padding:10px;background:#0A2F1C;border:1px solid #30D158;
+                        border-radius:8px;color:#30D158;font-size:0.78rem">
+                ✅ Le badge <b>"Safe Instagram"</b> (vert, ≥60%) signifie que votre video a suffisamment
+                de modifications pour passer la detection d'Instagram — et donc de toutes les plateformes.
+            </div>
+            <div style="margin-top:6px;padding:10px;background:#2C2C2E;border:1px solid #3A3A3C;
+                        border-radius:8px;color:#FF9F0A;font-size:0.78rem">
+                ⚠️ Le badge <b>"Safe TikTok"</b> (orange, 30-59%) passe TikTok mais risque la detection
+                sur Instagram Reels. Activez plus de modifications si vous ciblez Instagram.
+            </div>
         </div>""", unsafe_allow_html=True)
 
     # Config values
@@ -686,19 +842,24 @@ def main():
             labels = {"tiktok":("TikTok","plat-tiktok"), "instagram":("Instagram","plat-instagram"),
                       "youtube":("YouTube","plat-youtube"), "other":("Autre","plat-other")}
             lbl, cls = labels.get(plat, ("Autre","plat-other"))
-            st.markdown(f'<span class="plat {cls}">{lbl} détecté</span>', unsafe_allow_html=True)
+            st.markdown(f'<span class="plat {cls}">{lbl} detecte</span>', unsafe_allow_html=True)
 
         col_l, col_r = st.columns([1, 3])
 
         with col_l:
-            if url and st.button("📥 Télécharger", type="primary", key="url_dl", use_container_width=True):
-                with st.spinner("Téléchargement..."):
+            if url and st.button("📥 Telecharger", type="primary", key="url_dl", use_container_width=True):
+                with st.spinner("Telechargement + scraping stats..."):
                     path, err = download_from_url(url)
                     if err:
                         st.error(f"Erreur: {err}")
                     else:
                         st.session_state['url_video'] = path
-                        for k in ['url_analyses','url_virality','url_captions','url_folder']:
+                        # Scrape engagement stats
+                        stats, stats_err = scrape_engagement_stats(url)
+                        if stats:
+                            st.session_state['url_engagement'] = stats
+                            st.session_state['url_virality'] = calculate_virality_score(stats)
+                        for k in ['url_analyses','url_folder']:
                             st.session_state.pop(k, None)
                         st.rerun()
 
@@ -708,29 +869,33 @@ def main():
                 st.video(vp)
                 st.markdown('</div>', unsafe_allow_html=True)
 
-                # Auto virality
-                if 'url_virality' not in st.session_state:
-                    st.session_state['url_virality'] = analyze_virality(vp)
-                st.markdown(render_virality(st.session_state['url_virality']), unsafe_allow_html=True)
+                # Afficher le score de viralite engagement
+                if 'url_virality' in st.session_state:
+                    st.markdown(render_virality(st.session_state['url_virality']), unsafe_allow_html=True)
 
                 nv = st.slider("Variations", 1, 15, 5, key="url_vars")
-                if st.button("Générer les variations", type="primary", key="url_gen", use_container_width=True):
+                if st.button("Generer les variations", type="primary", key="url_gen", use_container_width=True):
                     prog = st.progress(0); stat = st.empty()
                     try:
                         analyses, folder = run_generation(vp, nv, output_dir, intensity, enabled_mods, prog, stat)
                         st.session_state['url_analyses'] = analyses
                         st.session_state['url_folder'] = folder
-                        vir = st.session_state.get('url_virality', {})
-                        st.session_state['url_captions'] = generate_captions(vir.get('duration', 0))
                         stat.empty(); prog.empty()
-                        st.success(f"✅ {len(analyses)} variations générées")
+                        st.success(f"✅ {len(analyses)} variations generees")
                     except Exception as e:
                         st.error(f"Erreur: {e}")
 
         with col_r:
             if 'url_analyses' in st.session_state:
-                render_results(st.session_state['url_analyses'], st.session_state.get('url_folder',''),
-                               "url", st.session_state.get('url_virality'), st.session_state.get('url_captions'))
+                render_results(
+                    st.session_state['url_analyses'],
+                    st.session_state.get('url_folder',''),
+                    "url",
+                    virality=st.session_state.get('url_virality'),
+                    captions_overlay=None,
+                    original_texts=None,
+                    descriptions=None
+                )
             else:
                 st.markdown("""<div style="background:#1C1C1E;border:1px solid #2C2C2E;border-radius:12px;
                     padding:32px;text-align:center;color:#48484A;margin-top:20px">
@@ -744,7 +909,7 @@ def main():
         col_l, col_r = st.columns([1, 3])
 
         with col_l:
-            uploaded = st.file_uploader("📹 Vidéo source", type=['mp4','mov','avi'], key="single_file")
+            uploaded = st.file_uploader("📹 Video source", type=['mp4','mov','avi'], key="single_file")
 
             if uploaded:
                 if 'single_temp' not in st.session_state:
@@ -757,14 +922,8 @@ def main():
                 st.video(uploaded)
                 st.markdown('</div>', unsafe_allow_html=True)
 
-                tp = st.session_state.get('single_temp')
-                if tp and os.path.exists(tp):
-                    if 'single_virality' not in st.session_state:
-                        st.session_state['single_virality'] = analyze_virality(tp)
-                    st.markdown(render_virality(st.session_state['single_virality']), unsafe_allow_html=True)
-
                 nv = st.slider("Variations", 1, 15, 5, key="single_vars")
-                if st.button("Générer les variations", type="primary", key="single_gen", use_container_width=True):
+                if st.button("Generer les variations", type="primary", key="single_gen", use_container_width=True):
                     tp = st.session_state.get('single_temp')
                     if not tp or not os.path.exists(tp):
                         tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
@@ -776,42 +935,51 @@ def main():
                         analyses, folder = run_generation(tp, nv, output_dir, intensity, enabled_mods, prog, stat)
                         st.session_state['single_analyses'] = analyses
                         st.session_state['single_folder'] = folder
-                        vir = st.session_state.get('single_virality', {})
-                        st.session_state['single_captions'] = generate_captions(vir.get('duration', 0))
+                        # OCR captions + descriptions
+                        captions_overlay, original_texts = generate_captions_from_ocr(tp)
+                        st.session_state['single_captions_overlay'] = captions_overlay
+                        st.session_state['single_original_texts'] = original_texts
+                        st.session_state['single_descriptions'] = generate_descriptions()
                         stat.empty(); prog.empty()
-                        st.success(f"✅ {len(analyses)} variations générées")
+                        st.success(f"✅ {len(analyses)} variations generees")
                     except Exception as e:
                         st.error(f"Erreur: {e}")
             else:
-                for k in ['single_temp','single_virality']:
+                for k in ['single_temp']:
                     if k in st.session_state:
-                        if k == 'single_temp':
-                            try: os.unlink(st.session_state[k])
-                            except: pass
+                        try: os.unlink(st.session_state[k])
+                        except Exception: pass
                         del st.session_state[k]
 
         with col_r:
             if 'single_analyses' in st.session_state:
-                render_results(st.session_state['single_analyses'], st.session_state.get('single_folder',''),
-                               "single", st.session_state.get('single_virality'), st.session_state.get('single_captions'))
+                render_results(
+                    st.session_state['single_analyses'],
+                    st.session_state.get('single_folder',''),
+                    "single",
+                    virality=None,
+                    captions_overlay=st.session_state.get('single_captions_overlay'),
+                    original_texts=st.session_state.get('single_original_texts'),
+                    descriptions=st.session_state.get('single_descriptions')
+                )
 
     # ===== BULK =====
     with tab_bulk:
         col_l, col_r = st.columns([1, 3])
 
         with col_l:
-            files = st.file_uploader("📹 Plusieurs vidéos", type=['mp4','mov','avi'],
+            files = st.file_uploader("📹 Plusieurs videos", type=['mp4','mov','avi'],
                                      accept_multiple_files=True, key="bulk_files")
             if files:
                 if len(files) > 10:
-                    st.warning("⚠️ Max 10 vidéos.")
+                    st.warning("⚠️ Max 10 videos.")
                     files = files[:10]
-                st.success(f"{len(files)} vidéos sélectionnées")
+                st.success(f"{len(files)} videos selectionnees")
                 for f in files[:3]: st.caption(f"📹 {f.name}")
                 if len(files) > 3: st.caption(f"... +{len(files)-3} autres")
 
-                vpv = st.slider("Var / vidéo", 1, 10, 3, key="bulk_vars")
-                st.info(f"**{len(files) * vpv} vidéos** au total")
+                vpv = st.slider("Var / video", 1, 10, 3, key="bulk_vars")
+                st.info(f"**{len(files) * vpv} videos** au total")
 
                 if st.button("Lancer", type="primary", key="bulk_gen", use_container_width=True):
                     bf = get_dated_folder_name() + " BULK"
@@ -844,6 +1012,12 @@ def main():
                                     })
                                     vr['success_count'] += 1
 
+                            # OCR captions for this video
+                            caps, orig = generate_captions_from_ocr(tmp.name)
+                            vr['captions_overlay'] = caps
+                            vr['original_texts'] = orig
+                            vr['descriptions'] = generate_descriptions()
+
                             all_res.append(vr)
                             os.unlink(tmp.name)
                             prog.progress((vi+1)/len(files))
@@ -851,7 +1025,7 @@ def main():
                         st.session_state['bulk_results'] = all_res
                         st.session_state['bulk_folder'] = bf
                         stat.empty()
-                        st.success(f"✅ {sum(r['success_count'] for r in all_res)} vidéos")
+                        st.success(f"✅ {sum(r['success_count'] for r in all_res)} videos")
                     except Exception as e:
                         st.error(f"Erreur: {e}")
 
@@ -868,7 +1042,7 @@ def main():
                 m1,m2,m3 = st.columns(3)
                 m1.metric("📹 Total", total)
                 m2.metric("📊 Moy.", f"{avg:.0f}%")
-                m3.metric("✅ Safe", f"{safe}/{len(allv)}")
+                m3.metric("✅ Safe Instagram", f"{safe}/{len(allv)}")
 
                 # ZIP all
                 buf = io.BytesIO()
@@ -879,40 +1053,23 @@ def main():
                             if p and os.path.exists(p):
                                 zf.write(p, f"{r['name']}/{v['name']}.mp4")
                 buf.seek(0)
-                st.download_button("📦 Tout télécharger (ZIP)", buf.getvalue(),
+                st.download_button("📦 Tout telecharger (ZIP)", buf.getvalue(),
                                    file_name=f"{bf}.zip", mime="application/zip",
                                    key="zip_bulk", use_container_width=True)
 
-                st.markdown("""<div class="legend">🟢 ≥60% = Safe &nbsp;|&nbsp; 🟠 30-59% = Attention &nbsp;|&nbsp; 🔴 <30% = Risque</div>""", unsafe_allow_html=True)
+                st.markdown("""<div class="legend">🟢 ≥60% = Safe Instagram &nbsp;|&nbsp; 🟠 30-59% = Safe TikTok seulement &nbsp;|&nbsp; 🔴 <30% = Risque</div>""", unsafe_allow_html=True)
 
                 for r in results:
                     with st.expander(f"📹 {r['name']} — {r['success_count']} variations", expanded=True):
-                        # Build grid HTML table
-                        grid_html = '<table class="rg-table"><tr class="rg-head"><td style="width:36px">#</td><td>Modifications</td><td style="width:56px">Score</td><td style="width:90px">Aperçu</td></tr>'
-                        for v in r['variations']:
-                            u = v['uniqueness']
-                            badge = get_badge(u)
-                            tags_html = format_tags(v.get('modifications',{}))
-                            t_img = '<span style="color:#48484A;font-size:.7rem">—</span>'
-                            t = v.get('thumbnail')
-                            if t and os.path.exists(t):
-                                b = thumb_b64(t)
-                                if b: t_img = f'<img src="data:image/jpeg;base64,{b}" class="rg-thumb" />'
-                            grid_html += f"""<tr class="rg-row">
-                                <td><span class="rg-name">{v['name']}</span></td>
-                                <td><span class="rg-tags">{tags_html}</span></td>
-                                <td class="rg-score"><span class="{badge}">{u:.0f}%</span></td>
-                                <td style="text-align:center">{t_img}</td>
-                            </tr>\n"""
-                        grid_html += '</table>'
-                        st.markdown(grid_html, unsafe_allow_html=True)
+                        # HTML table grid
+                        st.markdown(build_grid_html(r['variations']), unsafe_allow_html=True)
 
                         # Download buttons
-                        cols = st.columns(min(5, len(r['variations'])))
+                        dl_cols = st.columns(min(5, max(1, len(r['variations']))))
                         for i, v in enumerate(r['variations']):
                             p = v.get('output_path','')
                             if p and os.path.exists(p):
-                                with cols[i % 5]:
+                                with dl_cols[i % 5]:
                                     with open(p, 'rb') as f:
                                         st.download_button(f"⬇ {v['name']}", f.read(),
                                             file_name=f"{r['name']}_{v['name']}.mp4",
@@ -920,17 +1077,255 @@ def main():
                                             use_container_width=True)
 
                         # Video previews
-                        pcols = st.columns(min(3, len(r['variations'])))
+                        pcols = st.columns(min(3, max(1, len(r['variations']))))
                         for i, v in enumerate(r['variations']):
                             p = v.get('output_path','')
                             if p and os.path.exists(p):
                                 with pcols[i % 3]:
                                     st.video(p)
-                                    st.markdown(f'<div style="text-align:center;margin-top:-6px;font-size:.75rem;color:#86868B">{v["name"]}</div>', unsafe_allow_html=True)
-            else:
-                st.info("👈 Upload plusieurs vidéos et lance le traitement")
+                                    u = v['uniqueness']
+                                    bc, _ = get_badge(u)
+                                    st.markdown(f'<div style="text-align:center;margin-top:-6px;font-size:.75rem;color:#86868B">{v["name"]} <span class="{bc}" style="font-size:.68rem;padding:1px 6px">{u:.0f}%</span></div>', unsafe_allow_html=True)
 
-    # ===== STATS =====
+                        # Captions + Descriptions per video
+                        if r.get('captions_overlay'):
+                            with st.expander("🎬 Captions (texte sur la video)", expanded=False):
+                                if r.get('original_texts'):
+                                    combined = " | ".join(r['original_texts'][:3])
+                                    st.markdown(f'<div style="background:#2C2C2E;border-radius:8px;padding:8px;margin-bottom:8px;font-size:0.78rem;color:#86868B"><b style="color:#F5F5F7">Texte detecte :</b> {combined}</div>', unsafe_allow_html=True)
+                                cc = st.columns(2)
+                                for ci, cap in enumerate(r['captions_overlay']):
+                                    with cc[ci % 2]:
+                                        st.code(cap, language=None)
+
+                        if r.get('descriptions'):
+                            with st.expander("📝 Descriptions (texte sous la video)", expanded=False):
+                                dc = st.columns(2)
+                                for di, desc in enumerate(r['descriptions']):
+                                    with dc[di % 2]:
+                                        st.code(desc, language=None)
+            else:
+                st.info("👈 Upload plusieurs videos et lance le traitement")
+
+    # ===== FERME (Farm Mode) =====
+    with tab_farm:
+        st.markdown("### 🏭 Mode Ferme — Traitement en masse")
+        st.markdown('<div style="color:#86868B;font-size:0.82rem;margin-bottom:12px">Upload 50+ videos sources, lance le traitement, reviens le matin. Tout sera pret avec les scores.</div>', unsafe_allow_html=True)
+
+        if not st.session_state.get('farm_running') and not st.session_state.get('farm_done'):
+            # === UPLOAD + CONFIG ===
+            farm_files = st.file_uploader(
+                "📹 Videos sources (50+ supportees)",
+                type=['mp4', 'mov', 'avi'],
+                accept_multiple_files=True,
+                key="farm_files"
+            )
+
+            if farm_files:
+                st.success(f"📹 {len(farm_files)} videos selectionnees")
+                for f in farm_files[:5]:
+                    st.caption(f"  📹 {f.name}")
+                if len(farm_files) > 5:
+                    st.caption(f"  ... +{len(farm_files)-5} autres")
+
+                fc1, fc2 = st.columns(2)
+                with fc1:
+                    farm_vpv = st.slider("Variations par video", 1, 20, 5, key="farm_vpv")
+                with fc2:
+                    farm_intensity = st.select_slider(
+                        "Intensite Ferme", options=["low","medium","high"],
+                        value="medium", key="farm_intensity"
+                    )
+
+                total_gen = len(farm_files) * farm_vpv
+                est_seconds = total_gen * 8
+                est_min = est_seconds // 60
+                est_sec = est_seconds % 60
+
+                st.markdown(f"""<div style="background:#1C1C1E;border:1px solid #2C2C2E;border-radius:12px;padding:14px;margin:10px 0">
+                    <div style="display:flex;gap:20px;flex-wrap:wrap">
+                        <div><span style="color:#86868B;font-size:0.75rem">Videos sources</span><br>
+                             <span style="color:#F5F5F7;font-size:1.2rem;font-weight:700">{len(farm_files)}</span></div>
+                        <div><span style="color:#86868B;font-size:0.75rem">Variations/video</span><br>
+                             <span style="color:#F5F5F7;font-size:1.2rem;font-weight:700">{farm_vpv}</span></div>
+                        <div><span style="color:#86868B;font-size:0.75rem">Total a generer</span><br>
+                             <span style="color:#007AFF;font-size:1.2rem;font-weight:700">{total_gen}</span></div>
+                        <div><span style="color:#86868B;font-size:0.75rem">Temps estime</span><br>
+                             <span style="color:#FF9F0A;font-size:1.2rem;font-weight:700">~{est_min}m{est_sec:02d}s</span></div>
+                    </div>
+                </div>""", unsafe_allow_html=True)
+
+                if st.button("🚀 Lancer la Ferme", type="primary", use_container_width=True, key="farm_start"):
+                    # Save files to temp
+                    temp_paths = []
+                    for uf in farm_files:
+                        tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
+                        tmp.write(uf.read()); tmp.close()
+                        temp_paths.append((uf.name, tmp.name))
+
+                    st.session_state['farm_running'] = True
+                    st.session_state['farm_results'] = []
+
+                    # Processing loop
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    metrics_container = st.empty()
+
+                    total_videos = len(temp_paths)
+                    total_variations = total_videos * farm_vpv
+                    completed = 0
+                    all_scores = []
+                    start_time = datetime.now()
+
+                    from uniquifier import uniquify_video_ffmpeg
+
+                    farm_folder = get_dated_folder_name() + " FERME"
+                    farm_path = os.path.join(output_dir, farm_folder)
+                    os.makedirs(farm_path, exist_ok=True)
+
+                    farm_results = []
+
+                    for vi, (vname_full, vpath) in enumerate(temp_paths):
+                        video_name = Path(vname_full).stem
+                        video_folder = os.path.join(farm_path, video_name)
+                        os.makedirs(video_folder, exist_ok=True)
+
+                        video_result = {
+                            'name': video_name,
+                            'variations': [],
+                            'success_count': 0
+                        }
+
+                        fi = st.session_state.get('farm_intensity', 'medium')
+
+                        for j in range(farm_vpv):
+                            status_text.markdown(f"""<div style="background:#1C1C1E;border:1px solid #2C2C2E;
+                                border-radius:8px;padding:8px 12px;font-size:0.85rem;color:#F5F5F7">
+                                ⏳ <b>[{vi+1}/{total_videos}]</b> {video_name} — V{j+1:02d}/{farm_vpv}
+                            </div>""", unsafe_allow_html=True)
+
+                            out = os.path.join(video_folder, f"V{j+1:02d}.mp4")
+                            r = uniquify_video_ffmpeg(vpath, out, fi, enabled_mods)
+
+                            if r["success"]:
+                                mods = r.get("modifications", {})
+                                a = estimate_uniqueness(mods)
+                                video_result['variations'].append({
+                                    'name': f"V{j+1:02d}",
+                                    'output_path': out,
+                                    'uniqueness': a['uniqueness'],
+                                    'modifications': mods,
+                                    'thumbnail': extract_thumbnail(out)
+                                })
+                                video_result['success_count'] += 1
+                                all_scores.append(a['uniqueness'])
+
+                            completed += 1
+                            progress_bar.progress(completed / total_variations)
+
+                            # Update metrics
+                            elapsed = (datetime.now() - start_time).total_seconds()
+                            rate = completed / max(elapsed, 1)
+                            remaining = (total_variations - completed) / max(rate, 0.01)
+                            avg_score = sum(all_scores) / len(all_scores) if all_scores else 0
+                            safe_count = sum(1 for s in all_scores if s >= 60)
+
+                            with metrics_container.container():
+                                mc1, mc2, mc3, mc4 = st.columns(4)
+                                mc1.metric("✅ Termine", f"{completed}/{total_variations}")
+                                mc2.metric("📊 Score moyen", f"{avg_score:.0f}%")
+                                mc3.metric("⏱️ Restant", f"~{int(remaining//60)}m{int(remaining%60):02d}s")
+                                mc4.metric("🟢 Safe Instagram", f"{safe_count}/{len(all_scores)}")
+
+                        farm_results.append(video_result)
+
+                        # Cleanup temp
+                        try: os.unlink(vpath)
+                        except Exception: pass
+
+                    st.session_state['farm_results'] = farm_results
+                    st.session_state['farm_folder'] = farm_folder
+                    st.session_state['farm_running'] = False
+                    st.session_state['farm_done'] = True
+                    st.rerun()
+
+        elif st.session_state.get('farm_done'):
+            # === RESULTS ===
+            results = st.session_state.get('farm_results', [])
+            farm_folder = st.session_state.get('farm_folder', '')
+
+            if results:
+                allv = [v for r in results for v in r['variations']]
+                total = len(allv)
+                avg = sum(v['uniqueness'] for v in allv) / len(allv) if allv else 0
+                safe = sum(1 for v in allv if v['uniqueness'] >= 60)
+
+                st.markdown(f"""<div style="background:#0A2F1C;border:1px solid #30D158;border-radius:12px;
+                    padding:14px;margin-bottom:12px;text-align:center">
+                    <span style="font-size:1.2rem;font-weight:700;color:#30D158">
+                        ✅ Ferme terminee — {total} videos generees
+                    </span>
+                </div>""", unsafe_allow_html=True)
+
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("📹 Videos sources", len(results))
+                m2.metric("🎬 Total genere", total)
+                m3.metric("📊 Score moyen", f"{avg:.0f}%")
+                m4.metric("🟢 Safe Instagram", f"{safe}/{total}")
+
+                # Global ZIP
+                buf = io.BytesIO()
+                with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+                    for r in results:
+                        for v in r['variations']:
+                            p = v.get('output_path', '')
+                            if p and os.path.exists(p):
+                                zf.write(p, f"{r['name']}/{v['name']}.mp4")
+                buf.seek(0)
+                st.download_button("📦 Tout telecharger (ZIP)", buf.getvalue(),
+                                   file_name=f"{farm_folder}.zip", mime="application/zip",
+                                   key="zip_farm", use_container_width=True)
+
+                st.markdown("""<div class="legend">🟢 ≥60% = Safe Instagram &nbsp;|&nbsp; 🟠 30-59% = Safe TikTok seulement &nbsp;|&nbsp; 🔴 <30% = Risque</div>""", unsafe_allow_html=True)
+
+                # Per-video expandable sections
+                for r in results:
+                    with st.expander(f"📹 {r['name']} — {r['success_count']} variations", expanded=False):
+                        st.markdown(build_grid_html(r['variations']), unsafe_allow_html=True)
+
+                        # Download buttons
+                        if r['variations']:
+                            dl_cols = st.columns(min(5, len(r['variations'])))
+                            for i, v in enumerate(r['variations']):
+                                p = v.get('output_path','')
+                                if p and os.path.exists(p):
+                                    with dl_cols[i % 5]:
+                                        with open(p, 'rb') as f:
+                                            st.download_button(f"⬇ {v['name']}", f.read(),
+                                                file_name=f"{r['name']}_{v['name']}.mp4",
+                                                mime="video/mp4", key=f"dlf_{r['name']}_{v['name']}",
+                                                use_container_width=True)
+
+                        # Video previews
+                        if r['variations']:
+                            pcols = st.columns(min(3, len(r['variations'])))
+                            for i, v in enumerate(r['variations']):
+                                p = v.get('output_path','')
+                                if p and os.path.exists(p):
+                                    with pcols[i % 3]:
+                                        st.video(p)
+                                        u = v['uniqueness']
+                                        bc, _ = get_badge(u)
+                                        st.markdown(f'<div style="text-align:center;margin-top:-6px;font-size:.75rem;color:#86868B">{v["name"]} <span class="{bc}" style="font-size:.68rem;padding:1px 6px">{u:.0f}%</span></div>', unsafe_allow_html=True)
+
+                # Reset button
+                st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+                if st.button("🔄 Nouvelle session Ferme", key="farm_reset", use_container_width=True):
+                    for k in ['farm_results', 'farm_done', 'farm_folder', 'farm_running']:
+                        st.session_state.pop(k, None)
+                    st.rerun()
+
+    # ===== STATISTIQUES =====
     with tab_stats:
         st.markdown("### 📊 Statistiques")
         if os.path.exists(output_dir):
@@ -939,12 +1334,34 @@ def main():
             sz = sum(f.stat().st_size for f in vids) / (1024*1024)
             c1,c2,c3 = st.columns(3)
             c1.metric("📁 Sessions", len(folders))
-            c2.metric("📹 Vidéos", len(vids))
+            c2.metric("📹 Videos", len(vids))
             c3.metric("💾 Espace", f"{sz:.1f} MB")
             st.markdown("---")
-            for f in sorted(folders, reverse=True):
-                n = len(list(Path(os.path.join(output_dir,f)).rglob("*.mp4")))
-                st.text(f"  📁 {f} — {n} vidéos")
+
+            # Categorize folders
+            farm_folders = [f for f in sorted(folders, reverse=True) if "FERME" in f]
+            bulk_folders = [f for f in sorted(folders, reverse=True) if "BULK" in f]
+            other_folders = [f for f in sorted(folders, reverse=True) if "FERME" not in f and "BULK" not in f]
+
+            if farm_folders:
+                st.markdown("#### 🏭 Sessions Ferme")
+                for f in farm_folders:
+                    n = len(list(Path(os.path.join(output_dir,f)).rglob("*.mp4")))
+                    st.text(f"  📁 {f} — {n} videos")
+
+            if bulk_folders:
+                st.markdown("#### 📦 Sessions Bulk")
+                for f in bulk_folders:
+                    n = len(list(Path(os.path.join(output_dir,f)).rglob("*.mp4")))
+                    st.text(f"  📁 {f} — {n} videos")
+
+            if other_folders:
+                st.markdown("#### 📤 Sessions Single / Import")
+                for f in other_folders:
+                    n = len(list(Path(os.path.join(output_dir,f)).rglob("*.mp4")))
+                    st.text(f"  📁 {f} — {n} videos")
+        else:
+            st.info("Aucune donnee — lance une generation pour voir les stats")
 
 
 if __name__ == "__main__":

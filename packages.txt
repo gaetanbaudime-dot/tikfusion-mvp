@@ -2,3 +2,5 @@ ffmpeg
 libgl1
 libsm6
 libxext6
+tesseract-ocr
+tesseract-ocr-fra
