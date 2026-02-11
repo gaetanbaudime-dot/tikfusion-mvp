@@ -1,6 +1,6 @@
 """
-TikFusion v5 — Professional video uniquifier
-Import URL | Single | Bulk | Ferme | Statistiques | Configuration
+TikFusion v6 — Professional video uniquifier + Multi-platform publisher
+Import URL | Single | Bulk | Ferme | Publier | Statistiques | Configuration
 """
 import streamlit as st
 import os
@@ -14,9 +14,37 @@ import base64
 import zipfile
 import io
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+
+from dotenv import load_dotenv
+load_dotenv()
+
+from postbridge import (
+    list_accounts as pb_list_accounts,
+    upload_video as pb_upload_video,
+    create_post as pb_create_post,
+    get_post_results as pb_get_post_results,
+    list_posts as pb_list_posts,
+    get_post as pb_get_post,
+    delete_post as pb_delete_post,
+    safe_call as pb_safe_call,
+    PLATFORM_ICONS as PB_ICONS,
+    PLATFORM_COLORS as PB_COLORS,
+)
+
+from database import (
+    save_session, save_variation, save_publication, save_pub_result,
+    update_publication_status, get_sessions, get_session_variations,
+    get_publications, get_analytics, init_db,
+)
+
+from uniqueness_checker import UniquenessChecker
+
+init_db()
+_uniqueness_checker = UniquenessChecker()
 
 st.set_page_config(page_title="TikFusion x LTP", page_icon="assets/favicon.svg", layout="wide", initial_sidebar_state="collapsed")
 
@@ -169,6 +197,37 @@ st.markdown("""
     }
     .farm-metric .value { font-size: 1.4rem; font-weight: 700; color: #F5F5F7; }
     .farm-metric .label { font-size: 0.7rem; color: #86868B; margin-top: 2px; }
+
+    /* PostBridge Publish */
+    .pb-account {
+        background: #1C1C1E; border: 1px solid #2C2C2E; border-radius: 10px;
+        padding: 10px 14px; margin: 4px 0; display: flex; align-items: center; gap: 10px;
+    }
+    .pb-account .pb-icon { font-size: 1.3rem; }
+    .pb-account .pb-user { font-weight: 600; color: #F5F5F7; font-size: 0.88rem; }
+    .pb-account .pb-plat { color: #86868B; font-size: 0.72rem; text-transform: capitalize; }
+    .pb-status-posted { background: #0A2F1C; color: #30D158; padding: 3px 10px; border-radius: 20px; font-size: 0.72rem; font-weight: 600; }
+    .pb-status-scheduled { background: #1C1C1E; color: #007AFF; border: 1px solid #007AFF; padding: 3px 10px; border-radius: 20px; font-size: 0.72rem; font-weight: 600; }
+    .pb-status-processing { background: #1C1C1E; color: #FF9F0A; border: 1px solid #FF9F0A; padding: 3px 10px; border-radius: 20px; font-size: 0.72rem; font-weight: 600; }
+    .pb-status-failed { background: #2D0A0A; color: #FF453A; padding: 3px 10px; border-radius: 20px; font-size: 0.72rem; font-weight: 600; }
+    .pb-post-card {
+        background: #1C1C1E; border: 1px solid #2C2C2E; border-radius: 12px;
+        padding: 14px; margin: 6px 0;
+    }
+    .pb-post-card .pb-caption-preview {
+        color: #86868B; font-size: 0.78rem; margin-top: 6px;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 400px;
+    }
+    .pb-result-link {
+        color: #007AFF; font-size: 0.78rem; text-decoration: none; font-weight: 500;
+    }
+    .pb-result-link:hover { text-decoration: underline; }
+    .pb-video-pick {
+        background: #1C1C1E; border: 1px solid #3A3A3C; border-radius: 8px;
+        padding: 8px 12px; cursor: pointer; transition: border-color 0.2s;
+    }
+    .pb-video-pick:hover { border-color: #007AFF; }
+    .pb-section-title { font-size: 0.85rem; font-weight: 600; color: #86868B; text-transform: uppercase; letter-spacing: 0.5px; margin: 14px 0 6px 0; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -566,29 +625,198 @@ def generate_descriptions(duration=0):
     return variants
 
 
-# ============ GENERATION ENGINE ============
+# ============ GENERATION ENGINE (parallel + real scoring + SQLite) ============
 
-def run_generation(input_path, num_vars, output_dir, intensity, enabled_mods, progress_bar, status_el):
+def run_generation(input_path, num_vars, output_dir, intensity, enabled_mods, progress_bar, status_el,
+                   session_mode="single", source_url=None, source_platform=None, virality_score=None):
     from uniquifier import uniquify_video_ffmpeg
     folder = get_dated_folder_name()
     out_dir = os.path.join(output_dir, folder)
     os.makedirs(out_dir, exist_ok=True)
 
-    results = []
+    # Prepare all output paths
+    tasks = []
     for i in range(num_vars):
-        status_el.text(f"⏳ V{i+1:02d}/{num_vars}...")
         out = os.path.join(out_dir, f"V{i+1:02d}.mp4")
-        r = uniquify_video_ffmpeg(input_path, out, intensity, enabled_mods)
-        if r["success"]:
+        tasks.append((i, input_path, out, intensity, enabled_mods))
+
+    # Parallel generation (3 workers)
+    raw_results = [None] * num_vars
+    completed = 0
+
+    def _worker(args):
+        idx, inp, outp, intens, mods = args
+        return idx, uniquify_video_ffmpeg(inp, outp, intens, mods)
+
+    max_workers = min(3, num_vars)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(_worker, t): t[0] for t in tasks}
+        for future in as_completed(futures):
+            idx, r = future.result()
+            raw_results[idx] = r
+            completed += 1
+            progress_bar.progress(completed / num_vars)
+            status_el.text(f"⏳ {completed}/{num_vars} genere(s)...")
+
+    # Process results + real uniqueness check + SQLite persist
+    session_id = save_session(
+        mode=session_mode, source_url=source_url,
+        source_platform=source_platform, virality_score=virality_score,
+        folder_name=folder, num_variations=num_vars, intensity=intensity
+    )
+
+    results = []
+    for i, r in enumerate(raw_results):
+        if r and r["success"]:
             mods = r.get("modifications", {})
-            a = estimate_uniqueness(mods)
+            out = r["output_path"]
+
+            # Use real UniquenessChecker for per-platform scores
+            try:
+                report = _uniqueness_checker.check_uniqueness(out, add_to_library=True)
+                a = {
+                    'uniqueness': report.overall_score,
+                    'tiktok_score': report.tiktok.uniqueness_score,
+                    'instagram_score': report.instagram.uniqueness_score,
+                    'youtube_score': report.youtube.uniqueness_score,
+                    'tiktok_issues': report.tiktok.issues,
+                    'instagram_issues': report.instagram.issues,
+                    'youtube_issues': report.youtube.issues,
+                }
+            except Exception:
+                # Fallback to formula-based scoring
+                a = estimate_uniqueness(mods)
+                a['tiktok_score'] = None
+                a['instagram_score'] = None
+                a['youtube_score'] = None
+
             a['name'] = Path(out).stem
             a['modifications'] = mods
             a['output_path'] = out
             a['thumbnail'] = extract_thumbnail(out)
+
+            # Persist to SQLite
+            save_variation(
+                session_id=session_id, name=a['name'], output_path=out,
+                uniqueness_score=a['uniqueness'],
+                tiktok_score=a.get('tiktok_score'),
+                instagram_score=a.get('instagram_score'),
+                youtube_score=a.get('youtube_score'),
+                modifications=mods
+            )
+
             results.append(a)
-        progress_bar.progress((i+1) / num_vars)
+
     return results, folder
+
+
+# ============ ONE-CLICK PIPELINE ============
+
+def run_pipeline(url, num_vars, output_dir, intensity, enabled_mods,
+                 pb_key, account_ids, caption, schedule_mode="now",
+                 drip_days=1, drip_per_day=3, progress_cb=None, status_cb=None):
+    """Full pipeline: URL -> download -> scrape -> generate -> upload -> publish/schedule."""
+    steps = []
+
+    # Step 1: Download
+    if status_cb: status_cb("📥 Telechargement de la video...")
+    path, err = download_from_url(url)
+    if err:
+        return None, f"Telechargement echoue: {err}"
+
+    # Step 2: Scrape engagement
+    if status_cb: status_cb("📊 Scraping engagement...")
+    platform = detect_platform(url)
+    stats, _ = scrape_engagement_stats(url)
+    virality = calculate_virality_score(stats) if stats else None
+
+    # Step 3: Generate variations
+    if status_cb: status_cb("🎬 Generation des variations...")
+    dummy_progress = type('', (), {'progress': lambda self, x: None})()
+    dummy_status = type('', (), {'text': lambda self, x: None, 'markdown': lambda self, x, **kw: None})()
+    results, folder = run_generation(
+        path, num_vars, output_dir, intensity, enabled_mods,
+        dummy_progress, dummy_status,
+        session_mode="pipeline", source_url=url, source_platform=platform,
+        virality_score=virality['score'] if virality else None
+    )
+
+    if not results:
+        return None, "Aucune variation generee"
+
+    # Step 4: Generate captions
+    captions_overlay, original_texts = generate_captions_from_ocr(path)
+    descriptions = generate_descriptions()
+
+    # Step 5: Upload + Publish
+    if not pb_key or not account_ids:
+        return {
+            'results': results, 'folder': folder, 'virality': virality,
+            'captions': captions_overlay, 'descriptions': descriptions,
+            'published': False
+        }, None
+
+    if status_cb: status_cb("🚀 Upload et publication...")
+    post_ids = []
+    total = len(results)
+
+    # Compute drip-feed schedule
+    schedules = []
+    if schedule_mode == "drip":
+        now = datetime.now()
+        slot_idx = 0
+        optimal_hours = [9, 12, 15, 18, 20]
+        for day in range(drip_days):
+            for slot in range(drip_per_day):
+                if slot_idx >= total:
+                    break
+                hour = optimal_hours[slot % len(optimal_hours)]
+                dt = now + timedelta(days=day, hours=hour - now.hour, minutes=-now.minute)
+                if dt <= now:
+                    dt += timedelta(days=1)
+                schedules.append(dt.isoformat())
+                slot_idx += 1
+        # Pad remaining with None
+        while len(schedules) < total:
+            schedules.append(None)
+    else:
+        schedules = [None] * total
+
+    for vi, res in enumerate(results):
+        vpath = res['output_path']
+        if not os.path.exists(vpath):
+            continue
+
+        mid, err = pb_safe_call(pb_upload_video, pb_key, vpath)
+        if err:
+            continue
+
+        sched = schedules[vi] if vi < len(schedules) else None
+        post_data, err = pb_safe_call(
+            pb_create_post, pb_key, caption, [mid], account_ids,
+            scheduled_at=sched
+        )
+        if err:
+            continue
+
+        post_id = post_data.get("id") or post_data.get("data", {}).get("id")
+        if post_id:
+            post_ids.append(post_id)
+            save_publication(
+                post_id=str(post_id), caption=caption,
+                account_ids=account_ids, platforms=[],
+                status="scheduled" if sched else "processing",
+                scheduled_at=sched
+            )
+
+        if progress_cb:
+            progress_cb((vi + 1) / total)
+
+    return {
+        'results': results, 'folder': folder, 'virality': virality,
+        'captions': captions_overlay, 'descriptions': descriptions,
+        'published': True, 'post_ids': post_ids, 'schedule_mode': schedule_mode,
+    }, None
 
 
 # ============ RESULTS RENDERER ============
@@ -654,6 +882,14 @@ def render_results(analyses, folder, prefix, virality=None, captions_overlay=Non
                            file_name=f"{folder}.zip", mime="application/zip",
                            key=f"zip_{prefix}", use_container_width=True)
 
+    # --- Quick publish button ---
+    video_paths_for_pub = [a.get('output_path','') for a in analyses if a.get('output_path') and os.path.exists(a.get('output_path',''))]
+    if video_paths_for_pub:
+        if st.button(f"🚀 Publier {len(video_paths_for_pub)} video(s) sur PostBridge", key=f"quick_pub_{prefix}",
+                      use_container_width=True, type="primary"):
+            st.session_state['quick_publish_videos'] = video_paths_for_pub
+            st.info("Allez dans l'onglet **Publier** pour finaliser la publication (legende, comptes, programmation).")
+
     st.markdown("""<div class="legend">🟢 ≥60% = Safe Instagram (toutes plateformes) &nbsp;|&nbsp; 🟠 30-59% = Safe TikTok seulement &nbsp;|&nbsp; 🔴 <30% = Risque detection</div>""", unsafe_allow_html=True)
 
     # HTML table grid
@@ -714,6 +950,55 @@ def render_results(analyses, folder, prefix, virality=None, captions_overlay=Non
                 with desc_cols[i % 2]:
                     st.code(desc, language=None)
 
+    # Quick-publish via PostBridge
+    video_paths = [a['output_path'] for a in analyses if a.get('output_path') and os.path.exists(a.get('output_path',''))]
+    if video_paths:
+        with st.expander(f"🚀 Publier {len(video_paths)} video(s) via PostBridge", expanded=False):
+            from dotenv import load_dotenv
+            load_dotenv()
+            qp_key = os.environ.get("POSTBRIDGE_API_KEY", "") or st.session_state.get("pb_api_key_input", "")
+
+            if not qp_key:
+                st.info("Configurez votre cle API dans l'onglet Publier pour activer la publication rapide.")
+            else:
+                # Load accounts if not cached
+                qp_accounts = st.session_state.get('pb_accounts', [])
+                if not qp_accounts:
+                    if st.button("Charger les comptes PostBridge", key=f"qp_load_{prefix}"):
+                        accs, err = pb_safe_call(pb_list_accounts, qp_key)
+                        if err:
+                            st.error(f"Erreur: {err}")
+                        else:
+                            st.session_state['pb_accounts'] = accs
+                            qp_accounts = accs
+                            st.rerun()
+
+                if qp_accounts:
+                    acc_opts = {f"{PB_ICONS.get(a['platform'],'🌐')} {a.get('username','?')} ({a['platform']})": a['id'] for a in qp_accounts}
+                    qp_sel = st.multiselect("Comptes", options=list(acc_opts.keys()), default=list(acc_opts.keys())[:1], key=f"qp_sel_{prefix}")
+                    qp_ids = [acc_opts[l] for l in qp_sel]
+
+                    qp_caption = st.text_area("Caption", height=80, key=f"qp_cap_{prefix}",
+                                              placeholder="Caption pour la publication...")
+
+                    qp_vids = st.multiselect("Videos a publier", options=[os.path.basename(v) for v in video_paths],
+                                             default=[os.path.basename(v) for v in video_paths[:1]], key=f"qp_vids_{prefix}")
+                    qp_paths = [v for v in video_paths if os.path.basename(v) in qp_vids]
+
+                    if qp_ids and qp_caption.strip() and qp_paths:
+                        if st.button("🚀 Publier maintenant", type="primary", key=f"qp_pub_{prefix}"):
+                            for vp in qp_paths:
+                                with st.spinner(f"Upload + publication {os.path.basename(vp)}..."):
+                                    mid, err = pb_safe_call(pb_upload_video, qp_key, vp)
+                                    if err:
+                                        st.error(f"Upload echoue: {err}")
+                                        continue
+                                    _, err = pb_safe_call(pb_create_post, qp_key, qp_caption.strip(), [mid], qp_ids)
+                                    if err:
+                                        st.error(f"Publication echouee: {err}")
+                                    else:
+                                        st.success(f"✅ {os.path.basename(vp)} publie !")
+
 
 # ============ MAIN ============
 
@@ -723,14 +1008,22 @@ def main():
         <span class="header-title">TikFusion</span>
     </div>""", unsafe_allow_html=True)
 
-    tab_url, tab_single, tab_bulk, tab_farm, tab_stats, tab_config = st.tabs([
-        "🔗 Import", "📤 Single", "📦 Bulk", "🏭 Ferme",
+    tab_url, tab_single, tab_bulk, tab_farm, tab_publish, tab_stats, tab_config = st.tabs([
+        "🔗 Import", "📤 Single", "📦 Bulk", "🏭 Ferme", "🚀 Publier",
         "📊 Statistiques", "⚙️ Configuration"
     ])
 
     # ===== CONFIGURATION (first for variables) =====
     with tab_config:
         st.markdown("### ⚙️ Configuration")
+
+        # --- PostBridge API Key ---
+        st.markdown("#### 🔑 Cle API PostBridge")
+        _env_key = os.environ.get("POSTBRIDGE_API_KEY", "")
+        st.text_input("Cle API PostBridge", value=_env_key, type="password", key="pb_api_key_input",
+                       help="Obtenez votre cle sur post-bridge.com/dashboard/api-keys")
+        st.markdown("---")
+
         c1, c2 = st.columns(2)
         with c1: output_dir = st.text_input("📁 Dossier de sortie", value="outputs", key="cfg_output")
         with c2: intensity = st.select_slider("🎚️ Intensite", options=["low","medium","high"], value="medium", key="cfg_intensity")
@@ -877,13 +1170,65 @@ def main():
                 if st.button("Generer les variations", type="primary", key="url_gen", use_container_width=True):
                     prog = st.progress(0); stat = st.empty()
                     try:
-                        analyses, folder = run_generation(vp, nv, output_dir, intensity, enabled_mods, prog, stat)
+                        vir = st.session_state.get('url_virality')
+                        analyses, folder = run_generation(
+                            vp, nv, output_dir, intensity, enabled_mods, prog, stat,
+                            session_mode="import", source_url=url,
+                            source_platform=detect_platform(url),
+                            virality_score=vir['score'] if vir else None
+                        )
                         st.session_state['url_analyses'] = analyses
                         st.session_state['url_folder'] = folder
+                        # Generate captions + descriptions for URL imports too
+                        caps, orig = generate_captions_from_ocr(vp)
+                        st.session_state['url_captions_overlay'] = caps
+                        st.session_state['url_original_texts'] = orig
+                        st.session_state['url_descriptions'] = generate_descriptions()
                         stat.empty(); prog.empty()
                         st.success(f"✅ {len(analyses)} variations generees")
                     except Exception as e:
                         st.error(f"Erreur: {e}")
+
+                # One-click pipeline button
+                st.markdown("---")
+                st.markdown('<div style="color:#86868B;font-size:0.72rem">Pipeline complet :</div>', unsafe_allow_html=True)
+                pb_key_env = os.environ.get("POSTBRIDGE_API_KEY", "")
+                pb_accounts_cached = st.session_state.get('pb_accounts', [])
+                if pb_key_env and pb_accounts_cached:
+                    acc_opts_pipe = {f"{PB_ICONS.get(a['platform'],'🌐')} {a.get('username','?')}": a['id'] for a in pb_accounts_cached}
+                    pipe_accs = st.multiselect("Comptes", list(acc_opts_pipe.keys()), default=list(acc_opts_pipe.keys())[:1], key="pipe_accs")
+                    pipe_ids = [acc_opts_pipe[l] for l in pipe_accs]
+                    pipe_caption = st.text_area("Caption", height=60, key="pipe_caption", placeholder="Caption pour publication...")
+                    pipe_mode = st.radio("Mode", ["Publier maintenant", "Drip-feed"], horizontal=True, key="pipe_mode")
+                    drip_days = 1; drip_ppd = 3
+                    if pipe_mode == "Drip-feed":
+                        dc1, dc2 = st.columns(2)
+                        with dc1: drip_days = st.number_input("Jours", 1, 30, 3, key="pipe_drip_days")
+                        with dc2: drip_ppd = st.number_input("Posts/jour", 1, 10, 3, key="pipe_drip_ppd")
+                    if st.button("⚡ Pipeline complet", type="primary", key="url_pipeline", use_container_width=True):
+                        prog2 = st.progress(0); stat2 = st.empty()
+                        pipe_result, pipe_err = run_pipeline(
+                            url, nv, output_dir, intensity, enabled_mods,
+                            pb_key_env, pipe_ids, pipe_caption.strip(),
+                            schedule_mode="drip" if pipe_mode == "Drip-feed" else "now",
+                            drip_days=drip_days, drip_per_day=drip_ppd,
+                            progress_cb=lambda p: prog2.progress(p),
+                            status_cb=lambda t: stat2.markdown(f'<div style="background:#1C1C1E;border:1px solid #2C2C2E;border-radius:8px;padding:8px;color:#F5F5F7;font-size:0.85rem">{t}</div>', unsafe_allow_html=True)
+                        )
+                        prog2.empty(); stat2.empty()
+                        if pipe_err:
+                            st.error(pipe_err)
+                        elif pipe_result:
+                            st.session_state['url_analyses'] = pipe_result['results']
+                            st.session_state['url_folder'] = pipe_result['folder']
+                            if pipe_result.get('virality'):
+                                st.session_state['url_virality'] = pipe_result['virality']
+                            st.session_state['url_captions_overlay'] = pipe_result.get('captions')
+                            st.session_state['url_descriptions'] = pipe_result.get('descriptions')
+                            n_pub = len(pipe_result.get('post_ids', []))
+                            st.success(f"✅ {len(pipe_result['results'])} variations + {n_pub} publication(s)")
+                else:
+                    st.caption("Configurez PostBridge dans l'onglet Publier pour activer le pipeline")
 
         with col_r:
             if 'url_analyses' in st.session_state:
@@ -892,9 +1237,9 @@ def main():
                     st.session_state.get('url_folder',''),
                     "url",
                     virality=st.session_state.get('url_virality'),
-                    captions_overlay=None,
-                    original_texts=None,
-                    descriptions=None
+                    captions_overlay=st.session_state.get('url_captions_overlay'),
+                    original_texts=st.session_state.get('url_original_texts'),
+                    descriptions=st.session_state.get('url_descriptions')
                 )
             else:
                 st.markdown("""<div style="background:#1C1C1E;border:1px solid #2C2C2E;border-radius:12px;
@@ -1056,6 +1401,14 @@ def main():
                 st.download_button("📦 Tout telecharger (ZIP)", buf.getvalue(),
                                    file_name=f"{bf}.zip", mime="application/zip",
                                    key="zip_bulk", use_container_width=True)
+
+                # Quick publish button
+                all_bulk_vids = [v.get('output_path','') for r in results for v in r['variations'] if v.get('output_path') and os.path.exists(v.get('output_path',''))]
+                if all_bulk_vids:
+                    if st.button(f"🚀 Publier {len(all_bulk_vids)} video(s) sur PostBridge", key="quick_pub_bulk",
+                                  use_container_width=True, type="primary"):
+                        st.session_state['quick_publish_videos'] = all_bulk_vids
+                        st.info("Allez dans l'onglet **Publier** pour finaliser la publication.")
 
                 st.markdown("""<div class="legend">🟢 ≥60% = Safe Instagram &nbsp;|&nbsp; 🟠 30-59% = Safe TikTok seulement &nbsp;|&nbsp; 🔴 <30% = Risque</div>""", unsafe_allow_html=True)
 
@@ -1325,43 +1678,600 @@ def main():
                         st.session_state.pop(k, None)
                     st.rerun()
 
+    # ===== PUBLIER (PostBridge UX) =====
+    with tab_publish:
+        # PostBridge publish tab
+        pb_key = os.environ.get("POSTBRIDGE_API_KEY", "") or st.session_state.get("pb_api_key_input", "")
+
+        if not pb_key:
+            st.markdown("""<div style="background:#1C1C1E;border:1px solid #2C2C2E;border-radius:16px;
+                padding:50px;text-align:center;margin-top:20px">
+                <div style="font-size:2.5rem;margin-bottom:12px">🚀</div>
+                <div style="font-size:1.1rem;font-weight:700;color:#F5F5F7">Publiez sur 9 plateformes</div>
+                <div style="font-size:.85rem;margin-top:8px;color:#86868B">TikTok · Instagram · YouTube · Facebook · Twitter · LinkedIn · Pinterest · Threads · Bluesky</div>
+                <div style="margin-top:16px;font-size:.78rem;color:#48484A">Ajoutez votre cle API PostBridge dans l'onglet Configuration</div>
+            </div>""", unsafe_allow_html=True)
+        else:
+            # Auto-load accounts
+            if 'pb_accounts' not in st.session_state:
+                accs, err = pb_safe_call(pb_list_accounts, pb_key)
+                if not err and accs:
+                    st.session_state['pb_accounts'] = accs
+            accounts = st.session_state.get('pb_accounts', [])
+
+            if st.button("🔄 Rafraichir", key="pb_reload_accs"):
+                accs, err = pb_safe_call(pb_list_accounts, pb_key)
+                if not err and accs:
+                    st.session_state['pb_accounts'] = accs
+                    accounts = accs
+                    st.rerun()
+
+            # === TWO-PANEL LAYOUT (PostBridge exact: 60/40) ===
+            col_compose, col_right = st.columns([1.5, 1])
+
+            with col_compose:
+                # --- Title (PostBridge exact) ---
+                st.markdown('<div style="font-size:1.5rem;font-weight:700;color:#F5F5F7;margin-bottom:2px">Publier votre video</div>', unsafe_allow_html=True)
+                st.markdown('<div style="color:#636366;font-size:0.82rem;margin-bottom:16px;cursor:pointer">🔍 Rechercher & Filtrer ▾</div>', unsafe_allow_html=True)
+
+                # --- Account avatars (real profile pics: scrape + cache) ---
+                import urllib.parse as _urlparse
+                import re as _re
+
+                def _fetch_avatar(platform, username):
+                    """Fetch real profile picture URL. Cached in session_state."""
+                    cache_key = f"_avatar_cache_{platform}_{username}"
+                    if cache_key in st.session_state:
+                        return st.session_state[cache_key]
+                    url = None
+                    safe_name = _urlparse.quote(username, safe='')
+                    try:
+                        import requests as _req
+                        if platform == "instagram":
+                            r = _req.get(f"https://www.instagram.com/{username}/",
+                                         headers={"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15"},
+                                         timeout=8)
+                            m = _re.search(r'og:image" content="([^"]+)', r.text)
+                            if m:
+                                url = m.group(1).replace("&amp;", "&")
+                        elif platform == "youtube":
+                            r = _req.get(f"https://www.youtube.com/@{safe_name}",
+                                         headers={"User-Agent": "Mozilla/5.0"},
+                                         timeout=8)
+                            m = _re.search(r'og:image" content="([^"]+)', r.text)
+                            if m:
+                                url = m.group(1)
+                        elif platform in ("tiktok", "twitter", "bluesky"):
+                            p_key = "x" if platform == "twitter" else platform
+                            url = f"https://unavatar.io/{p_key}/{safe_name}"
+                    except Exception:
+                        pass
+                    if not url:
+                        plat_hex = {"instagram":"E1306C","tiktok":"010101","twitter":"1DA1F2","youtube":"FF0000",
+                                    "facebook":"1877F2","linkedin":"0A66C2","pinterest":"E60023","threads":"333","bluesky":"0085FF"}
+                        bg = plat_hex.get(platform, "6B7280")
+                        url = f"https://ui-avatars.com/api/?name={safe_name}&background={bg}&color=fff&size=100&bold=true&rounded=true"
+                    st.session_state[cache_key] = url
+                    return url
+
+                platform_badge_bg = {
+                    "instagram": "#E1306C", "tiktok": "#010101", "twitter": "#1DA1F2",
+                    "youtube": "#FF0000", "facebook": "#1877F2", "linkedin": "#0A66C2",
+                    "pinterest": "#E60023", "threads": "#010101", "bluesky": "#0085FF",
+                }
+                platform_badge_svg = {
+                    "instagram": "📷", "tiktok": "♪", "twitter": "𝕏",
+                    "youtube": "▶", "facebook": "f", "linkedin": "in",
+                    "pinterest": "📌", "threads": "@", "bluesky": "🦋",
+                }
+
+                if 'pb_selected_ids' not in st.session_state:
+                    st.session_state['pb_selected_ids'] = [a['id'] for a in accounts[:2]] if accounts else []
+
+                if accounts:
+                    # Pure CSS approach: background-image with fallback URL (no <img>, no JS)
+                    # Streamlit strips onerror from <img> tags, so we use CSS background-image
+                    # CSS renders first URL that loads; if it fails, shows next URL
+                    _plat_hex = {"instagram":"E1306C","tiktok":"010101","twitter":"1DA1F2","youtube":"FF0000",
+                                 "facebook":"1877F2","linkedin":"0A66C2","pinterest":"E60023","threads":"333","bluesky":"0085FF"}
+                    avatars_html = '<div style="display:flex;gap:14px;margin-bottom:18px;flex-wrap:wrap">'
+                    for acc in accounts[:8]:
+                        p = acc.get("platform", "")
+                        uname = acc.get("username", "?")
+                        aid = acc['id']
+                        is_sel = aid in st.session_state['pb_selected_ids']
+                        badge_bg = platform_badge_bg.get(p, "#6B7280")
+                        badge_icon = platform_badge_svg.get(p, "?")
+                        safe_name = _urlparse.quote(uname, safe='')
+                        fb_bg = _plat_hex.get(p, "6B7280")
+                        fallback_url = f"https://ui-avatars.com/api/?name={safe_name}&background={fb_bg}&color=fff&size=100&bold=true&rounded=true&format=png"
+                        primary_url = _fetch_avatar(p, uname)
+                        ring = "3px solid #48BB78" if is_sel else "3px solid #3A3A3C"
+                        grey = "" if is_sel else "filter:grayscale(100%);opacity:0.5;"
+                        avatars_html += f'''<div style="position:relative;cursor:pointer;{grey}" title="{uname} ({p})">
+                            <div style="width:50px;height:50px;border-radius:50%;border:{ring};
+                                        background-image:url('{primary_url}'),url('{fallback_url}');
+                                        background-size:cover;background-position:center;background-color:#4B5563">
+                            </div>
+                            <div style="position:absolute;top:-3px;left:-3px;width:20px;height:20px;border-radius:50%;
+                                        background:{badge_bg};border:2px solid #0E1117;display:flex;align-items:center;
+                                        justify-content:center;font-size:9px;color:#fff;line-height:1;z-index:3">
+                                {badge_icon}
+                            </div>
+                        </div>'''
+                    avatars_html += '</div>'
+                    st.markdown(avatars_html, unsafe_allow_html=True)
+
+                    # Functional account selector
+                    account_options = {f"{PB_ICONS.get(a['platform'],'🌐')} {a.get('username','?')} ({a['platform']})": a['id'] for a in accounts}
+                    selected_labels = st.multiselect("Comptes", list(account_options.keys()),
+                                                     default=[k for k, v in account_options.items() if v in st.session_state['pb_selected_ids']],
+                                                     key="pb_sel_labels", label_visibility="collapsed")
+                    selected_ids = [account_options[l] for l in selected_labels]
+                    st.session_state['pb_selected_ids'] = selected_ids
+                else:
+                    selected_ids = []
+                    st.info("Aucun compte connecte. Ajoutez des comptes sur PostBridge puis rafraichissez.")
+
+                # --- Upload zone (PostBridge exact: dashed, centered, green icon) ---
+                st.markdown("""<div style="border:2px dashed #3A3A3C;border-radius:12px;padding:36px 24px;
+                    text-align:center;margin:16px 0;background:#1C1C1E">
+                    <div style="font-size:2.8rem;margin-bottom:8px;color:#48BB78">🖼️</div>
+                    <div style="font-size:0.95rem;font-weight:600;color:#F5F5F7">Glissez-deposez votre video ici</div>
+                    <div style="font-size:0.8rem;color:#636366;margin-top:6px">ou collez depuis le presse-papier 📋</div>
+                    <div style="font-size:0.82rem;color:#86868B;margin-top:12px">Video ℹ️</div>
+                </div>""", unsafe_allow_html=True)
+
+                # Drag & drop uniquement
+                pb_upload = st.file_uploader("Deposer votre video", type=['mp4','mov'], key="pb_direct_upload",
+                                             label_visibility="collapsed")
+                selected_video_paths = []
+
+                # --- Main Caption (PostBridge exact: label + textarea + counter) ---
+                st.markdown('<div style="font-size:0.88rem;font-weight:600;color:#F5F5F7;margin:16px 0 6px 0">Legende principale ℹ️</div>', unsafe_allow_html=True)
+                caption = st.text_area("caption", height=130, key="pb_caption",
+                                       placeholder="Ecrivez votre caption ici...\n\n#fyp #viral #trending",
+                                       label_visibility="collapsed")
+                cap_len = len(caption) if caption else 0
+                st.markdown(f'<div style="text-align:right;color:#636366;font-size:0.78rem;margin-top:-8px">{cap_len}/2200</div>', unsafe_allow_html=True)
+
+                # --- Per-platform captions (hidden under expander) ---
+                platform_configs = {}
+                if accounts:
+                    selected_platforms = set(a['platform'] for a in accounts)
+                    with st.expander("Captions par plateforme", expanded=False):
+                        for plat in sorted(selected_platforms):
+                            icon = PB_ICONS.get(plat, "🌐")
+                            custom = st.text_area(f"{icon} {plat.capitalize()}", height=60,
+                                                  key=f"pb_cap_{plat}", placeholder="Vide = caption principale")
+                            if custom.strip():
+                                platform_configs[plat] = {"caption": custom.strip()}
+
+                # --- Post configurations & tools (PostBridge chips) ---
+                st.markdown('<div style="color:#636366;font-size:0.78rem;margin:12px 0 8px 0">Configuration & outils</div>', unsafe_allow_html=True)
+                plat_names = sorted(set(a['platform'] for a in accounts)) if accounts else []
+                chip_style = 'display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border:1px solid #3A3A3C;border-radius:8px;font-size:0.8rem;color:#E5E5EA;background:#1C1C1E;margin:0 6px 8px 0;font-weight:500;cursor:pointer'
+                chips_html = f'''<div style="margin-bottom:8px">
+                    <span style="{chip_style}"><span style="width:8px;height:8px;border-radius:50%;background:#48BB78;display:inline-block"></span> Legendes par plateforme ▾</span>
+                    <span style="{chip_style}">✏️ Anciennes legendes ▾</span>
+                    <span style="{chip_style}">⚙️ Traitement ▾</span>
+                </div><div>'''
+                for pn in plat_names[:4]:
+                    chips_html += f'<span style="{chip_style}">{PB_ICONS.get(pn,"🌐")} {pn.capitalize()} Config ▾</span>'
+                chips_html += '</div>'
+                st.markdown(chips_html, unsafe_allow_html=True)
+
+            # === RIGHT PANEL (PostBridge: Apercu media + Schedule + Action buttons) ===
+            with col_right:
+                # --- Apercu media card ---
+                st.markdown('<div style="background:#1C1C1E;border:1px solid #2C2C2E;border-radius:14px;padding:18px;margin-bottom:14px">', unsafe_allow_html=True)
+                st.markdown('<div style="font-size:0.92rem;font-weight:700;color:#F5F5F7;margin-bottom:10px">Apercu media</div>', unsafe_allow_html=True)
+                vids_to_show = selected_video_paths[:1]
+                if vids_to_show:
+                    st.video(vids_to_show[0])
+                elif pb_upload:
+                    st.video(pb_upload)
+                else:
+                    st.markdown('<div style="background:#2C2C2E;border-radius:10px;height:220px;display:flex;align-items:center;justify-content:center;color:#636366;font-size:0.85rem">Aucune video selectionnee. Glissez une video a gauche.</div>', unsafe_allow_html=True)
+                st.markdown('</div>', unsafe_allow_html=True)
+
+                # --- Schedule post card (PostBridge: toggle + Pick a time / Add to queue) ---
+                st.markdown('<div style="background:#1C1C1E;border:1px solid #2C2C2E;border-radius:14px;padding:18px;margin-bottom:14px">', unsafe_allow_html=True)
+                sched_toggle = st.toggle("Programmer la publication", key="pb_sched_toggle")
+
+                if sched_toggle:
+                    sched_tab = st.radio("Mode", ["Choisir une heure", "File d'attente", "Drip-feed"],
+                                         horizontal=True, key="pb_sched_tab_radio", label_visibility="collapsed")
+                    st.session_state['pb_sched_tab'] = 'pick' if sched_tab == "Choisir une heure" else ('drip' if sched_tab == "Drip-feed" else 'queue')
+
+                    if sched_tab == "Choisir une heure":
+                        sc1, sc2 = st.columns(2)
+                        with sc1:
+                            sched_date = st.date_input("Date", key="pb_sched_date", label_visibility="collapsed")
+                        with sc2:
+                            sched_time = st.time_input("Heure", key="pb_sched_time", label_visibility="collapsed")
+                        if sched_date and sched_time:
+                            dt = datetime.combine(sched_date, sched_time)
+                            st.markdown(f'<div style="color:#636366;font-size:0.78rem;margin-top:6px">Votre post sera publie a {dt.strftime("%Hh%M")} heure locale.</div>', unsafe_allow_html=True)
+                    elif sched_tab == "Drip-feed":
+                        dc1, dc2 = st.columns(2)
+                        with dc1:
+                            st.number_input("Jours", 1, 30, 3, key="pb_drip_days")
+                        with dc2:
+                            st.number_input("Posts/jour", 1, 10, 3, key="pb_drip_ppd")
+                        drip_d = st.session_state.get('pb_drip_days', 3)
+                        drip_p = st.session_state.get('pb_drip_ppd', 3)
+                        st.markdown(f'<div style="color:#636366;font-size:0.78rem;margin-top:6px">{drip_p} posts/jour sur {drip_d} jours aux heures optimales</div>', unsafe_allow_html=True)
+                    else:
+                        st.markdown('<div style="color:#636366;font-size:0.78rem;margin-top:6px">Les posts seront ajoutes a la file d\'attente et publies automatiquement.</div>', unsafe_allow_html=True)
+
+                st.markdown('</div>', unsafe_allow_html=True)
+
+                # --- ACTION BUTTONS (Post / Schedule) ---
+                videos_to_publish = selected_video_paths.copy()
+                if pb_upload and not videos_to_publish:
+                    tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
+                    tmp.write(pb_upload.read()); tmp.close()
+                    videos_to_publish = [tmp.name]
+                    pb_upload.seek(0)
+
+                can_publish = bool(videos_to_publish) and bool(caption.strip()) and bool(selected_ids)
+
+                btn1, btn2 = st.columns(2)
+                with btn1:
+                    post_now = st.button("🚀 Publier maintenant", type="primary", use_container_width=True, key="pb_post_now",
+                                         disabled=not can_publish)
+                with btn2:
+                    post_sched = st.button("📅 Programmer", use_container_width=True, key="pb_post_sched",
+                                           disabled=not can_publish)
+
+                do_publish = post_now or post_sched
+                if do_publish and can_publish:
+                    progress = st.progress(0)
+                    status_el = st.empty()
+                    all_post_ids = []
+                    nb_vids = len(videos_to_publish)
+
+                    sched_on = st.session_state.get('pb_sched_toggle', False)
+                    sched_mode = st.session_state.get('pb_sched_tab', 'pick')
+                    drip_days_val = st.session_state.get('pb_drip_days', 3)
+                    drip_ppd_val = st.session_state.get('pb_drip_ppd', 3)
+
+                    schedules = [None] * nb_vids
+                    if sched_on and post_sched:
+                        if sched_mode == 'pick':
+                            sd = st.session_state.get('pb_sched_date')
+                            st_time = st.session_state.get('pb_sched_time')
+                            if sd and st_time:
+                                dt = datetime.combine(sd, st_time)
+                                schedules = [dt.isoformat()] * nb_vids
+                        elif sched_mode == 'drip':
+                            now = datetime.now()
+                            optimal_hours = [9, 12, 15, 18, 20]
+                            slot_idx = 0
+                            for day in range(drip_days_val):
+                                for slot in range(drip_ppd_val):
+                                    if slot_idx >= nb_vids:
+                                        break
+                                    hour = optimal_hours[slot % len(optimal_hours)]
+                                    dt = now.replace(hour=hour, minute=0, second=0) + timedelta(days=day + 1)
+                                    schedules[slot_idx] = dt.isoformat()
+                                    slot_idx += 1
+
+                    for vi, vpath in enumerate(videos_to_publish):
+                        status_el.markdown(f'<div style="background:#0D2818;border:1px solid #48BB78;border-radius:8px;padding:10px;color:#48BB78;font-size:0.82rem">⬆️ Upload [{vi+1}/{nb_vids}] {os.path.basename(vpath)}</div>', unsafe_allow_html=True)
+                        media_id, err = pb_safe_call(pb_upload_video, pb_key, vpath)
+                        if err:
+                            st.error(f"Upload: {err}")
+                            continue
+                        progress.progress((vi * 2 + 1) / (nb_vids * 2))
+
+                        status_el.markdown(f'<div style="background:#0D2818;border:1px solid #48BB78;border-radius:8px;padding:10px;color:#48BB78;font-size:0.82rem">🚀 Publish [{vi+1}/{nb_vids}]</div>', unsafe_allow_html=True)
+                        sched = schedules[vi] if vi < len(schedules) else None
+                        post_data, err = pb_safe_call(
+                            pb_create_post, pb_key, caption.strip(),
+                            [media_id], selected_ids,
+                            scheduled_at=sched,
+                            platform_configs=platform_configs if platform_configs else None
+                        )
+                        if err:
+                            st.error(f"Publish: {err}")
+                            continue
+                        post_id = post_data.get("id") or post_data.get("data", {}).get("id")
+                        if post_id:
+                            all_post_ids.append(post_id)
+                            plats = [a['platform'] for a in accounts if a['id'] in selected_ids]
+                            save_publication(
+                                post_id=str(post_id), caption=caption.strip(),
+                                account_ids=selected_ids, platforms=plats,
+                                status="scheduled" if sched else "processing",
+                                scheduled_at=sched
+                            )
+                        progress.progress((vi * 2 + 2) / (nb_vids * 2))
+
+                    status_el.empty(); progress.empty()
+                    if all_post_ids:
+                        is_sched = any(s for s in schedules if s)
+                        st.markdown(f"""<div style="background:#0D2818;border:1px solid #48BB78;border-radius:12px;
+                            padding:14px;text-align:center;margin:8px 0">
+                            <span style="font-size:1.05rem;font-weight:700;color:#48BB78">
+                                {'📅 Programme' if is_sched else '✅ Publie'} — {len(all_post_ids)} post(s)
+                            </span>
+                        </div>""", unsafe_allow_html=True)
+                        st.session_state['pb_last_post_ids'] = all_post_ids
+
+                st.markdown("---")
+
+                # --- Posts list ---
+                if st.button("🔄 Actualiser les posts", key="pb_refresh_posts"):
+                    posts_data, err = pb_safe_call(pb_list_posts, pb_key)
+                    if not err:
+                        st.session_state['pb_posts_cache'] = posts_data.get("data", [])
+
+                cached_posts = st.session_state.get('pb_posts_cache', [])
+                card_style = "background:#1C1C1E;border:1px solid #2C2C2E;border-radius:14px;padding:16px;margin-bottom:12px"
+                row_style = "display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #2C2C2E"
+
+                scheduled = [p for p in cached_posts if p.get("status") == "scheduled"]
+                if scheduled:
+                    st.markdown(f'<div style="{card_style}">', unsafe_allow_html=True)
+                    st.markdown(f'<div style="font-size:0.92rem;font-weight:700;color:#F5F5F7;margin-bottom:8px">📅 Programmes ({len(scheduled)})</div>', unsafe_allow_html=True)
+                    for p in scheduled[:6]:
+                        sa = p.get("scheduled_at", "")
+                        sl = sa[:16].replace("T", " ") if sa else "—"
+                        pc = (p.get("caption", "") or "")[:50]
+                        pi_html = ""
+                        for a in accounts:
+                            if a.get("id") in p.get("social_accounts", []):
+                                pi_html += f'<span style="margin-right:3px">{PB_ICONS.get(a["platform"],"🌐")}</span>'
+                        st.markdown(f'<div style="{row_style}"><div style="color:#636366;font-size:0.75rem;min-width:90px">{sl}</div><div style="flex:1;color:#F5F5F7;font-size:0.82rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{pc}</div><div>{pi_html}</div></div>', unsafe_allow_html=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+
+                live = [p for p in cached_posts if p.get("status") == "posted"]
+                if live:
+                    st.markdown(f'<div style="{card_style}">', unsafe_allow_html=True)
+                    st.markdown(f'<div style="font-size:0.92rem;font-weight:700;color:#F5F5F7;margin-bottom:8px">✅ En ligne ({len(live)})</div>', unsafe_allow_html=True)
+                    for p in live[:8]:
+                        pid = p.get("id", "?")
+                        pc = (p.get("caption", "") or "")[:50]
+                        cr = (p.get("created_at", "") or "")[:10]
+                        pi_html = ""
+                        for a in accounts:
+                            if a.get("id") in p.get("social_accounts", []):
+                                pi_html += f'<span style="margin-right:3px">{PB_ICONS.get(a["platform"],"🌐")}</span>'
+                        st.markdown(f'<div style="{row_style}"><div style="color:#636366;font-size:0.75rem;min-width:70px">{cr}</div><div style="flex:1;color:#F5F5F7;font-size:0.82rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{pc}</div><div>{pi_html}</div></div>', unsafe_allow_html=True)
+                        results_data, _ = pb_safe_call(pb_get_post_results, pb_key, str(pid))
+                        if results_data:
+                            for res in results_data.get("data", []):
+                                purl = res.get("platform_data", {}).get("url", "")
+                                puname = res.get("platform_data", {}).get("username", "")
+                                if purl:
+                                    st.markdown(f'<a href="{purl}" target="_blank" style="color:#48BB78;font-size:0.75rem;text-decoration:none;margin-left:80px">🔗 {puname}</a>', unsafe_allow_html=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+
+                processing = [p for p in cached_posts if p.get("status") == "processing"]
+                if processing:
+                    st.markdown(f'<div style="{card_style[:-1]}border-color:#FCD34D">', unsafe_allow_html=True)
+                    st.markdown(f'<div style="font-size:0.92rem;font-weight:700;color:#D97706;margin-bottom:8px">⏳ En cours ({len(processing)})</div>', unsafe_allow_html=True)
+                    for p in processing[:5]:
+                        pc = (p.get("caption", "") or "")[:50]
+                        st.markdown(f'<div style="color:#6B7280;font-size:0.82rem;padding:4px 0">{pc}</div>', unsafe_allow_html=True)
+                    st.markdown('</div>', unsafe_allow_html=True)
+
     # ===== STATISTIQUES =====
     with tab_stats:
-        st.markdown("### 📊 Statistiques")
+        st.markdown("### 📊 Statistiques & Analytics")
+
+        # ---- Disk stats (always available) ----
         if os.path.exists(output_dir):
             vids = list(Path(output_dir).rglob("*.mp4"))
             folders = [f for f in os.listdir(output_dir) if os.path.isdir(os.path.join(output_dir, f))]
             sz = sum(f.stat().st_size for f in vids) / (1024*1024)
-            c1,c2,c3 = st.columns(3)
-            c1.metric("📁 Sessions", len(folders))
-            c2.metric("📹 Videos", len(vids))
-            c3.metric("💾 Espace", f"{sz:.1f} MB")
-            st.markdown("---")
+            dc1, dc2, dc3 = st.columns(3)
+            dc1.metric("📁 Dossiers", len(folders))
+            dc2.metric("📹 Videos sur disque", len(vids))
+            dc3.metric("💾 Espace utilise", f"{sz:.1f} MB")
+        else:
+            st.info("Aucun dossier de sortie detecte.")
 
-            # Categorize folders
+        st.markdown("---")
+
+        # ---- SQLite analytics ----
+        analytics = get_analytics()
+
+        # KPI row
+        k1, k2, k3, k4, k5 = st.columns(5)
+        k1.metric("Sessions totales", analytics.get("total_sessions", 0))
+        k2.metric("Variations generees", analytics.get("total_variations", 0))
+        k3.metric("Score moyen", f"{analytics.get('avg_uniqueness', 0)}%")
+        k4.metric("Variations safe (>=60%)", analytics.get("safe_count", 0))
+        total_vars = analytics.get("total_variations", 0)
+        safe_rate = round(analytics["safe_count"] / total_vars * 100) if total_vars else 0
+        k5.metric("Taux safe", f"{safe_rate}%")
+
+        st.markdown("---")
+
+        # ---- Publication KPIs ----
+        st.markdown("#### Publications")
+        p1, p2, p3, p4, p5 = st.columns(5)
+        p1.metric("Total publications", analytics.get("total_publications", 0))
+        p2.metric("Publiees", analytics.get("pub_posted", 0))
+        p3.metric("Programmees", analytics.get("pub_scheduled", 0))
+        p4.metric("En cours", analytics.get("pub_processing", 0))
+        succ = analytics.get("successful_publications", 0)
+        fail = analytics.get("failed_publications", 0)
+        pub_total = succ + fail
+        success_rate = round(succ / pub_total * 100) if pub_total else 0
+        p5.metric("Taux de succes", f"{success_rate}%")
+
+        st.markdown("---")
+
+        # ---- Charts row ----
+        chart_left, chart_right = st.columns(2)
+
+        # Score distribution bar chart
+        with chart_left:
+            st.markdown("#### Distribution des scores d'unicite")
+            score_dist = analytics.get("score_distribution", {})
+            if score_dist:
+                buckets_order = ["0-19", "20-39", "40-59", "60-79", "80-100"]
+                chart_data = {b: score_dist.get(b, 0) for b in buckets_order}
+                st.bar_chart(chart_data)
+            else:
+                st.caption("Aucune variation enregistree.")
+
+        # Sessions by mode pie-like display
+        with chart_right:
+            st.markdown("#### Sessions par mode")
+            modes = analytics.get("sessions_by_mode", {})
+            if modes:
+                for mode_name, cnt in sorted(modes.items(), key=lambda x: -x[1]):
+                    pct = round(cnt / analytics["total_sessions"] * 100) if analytics["total_sessions"] else 0
+                    st.markdown(f"""
+                    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+                        <div style="flex:1;background:#2A2A2E;border-radius:6px;overflow:hidden;height:24px">
+                            <div style="width:{pct}%;height:100%;background:linear-gradient(90deg,#66cc8a,#30D158);border-radius:6px;
+                                        display:flex;align-items:center;padding-left:8px;font-size:12px;color:#fff;font-weight:600">
+                                {mode_name}
+                            </div>
+                        </div>
+                        <span style="color:#8E8E93;font-size:13px;min-width:60px;text-align:right">{cnt} ({pct}%)</span>
+                    </div>""", unsafe_allow_html=True)
+            else:
+                st.caption("Aucune session enregistree.")
+
+        st.markdown("---")
+
+        # ---- Platform scores ----
+        st.markdown("#### Scores moyens par plateforme")
+        plat1, plat2, plat3 = st.columns(3)
+        avg_tk = analytics.get("avg_tiktok")
+        avg_ig = analytics.get("avg_instagram")
+        avg_yt = analytics.get("avg_youtube")
+        plat1.markdown(f"""
+        <div style="background:#1A1A1E;border:1px solid #FF004F;border-radius:12px;padding:20px;text-align:center">
+            <div style="font-size:28px">🎵</div>
+            <div style="font-size:13px;color:#8E8E93;margin:4px 0">TikTok</div>
+            <div style="font-size:24px;font-weight:700;color:#FF004F">{f'{avg_tk:.0f}%' if avg_tk else '—'}</div>
+        </div>""", unsafe_allow_html=True)
+        plat2.markdown(f"""
+        <div style="background:#1A1A1E;border:1px solid #E1306C;border-radius:12px;padding:20px;text-align:center">
+            <div style="font-size:28px">📸</div>
+            <div style="font-size:13px;color:#8E8E93;margin:4px 0">Instagram</div>
+            <div style="font-size:24px;font-weight:700;color:#E1306C">{f'{avg_ig:.0f}%' if avg_ig else '—'}</div>
+        </div>""", unsafe_allow_html=True)
+        plat3.markdown(f"""
+        <div style="background:#1A1A1E;border:1px solid #FF0000;border-radius:12px;padding:20px;text-align:center">
+            <div style="font-size:28px">▶️</div>
+            <div style="font-size:13px;color:#8E8E93;margin:4px 0">YouTube</div>
+            <div style="font-size:24px;font-weight:700;color:#FF0000">{f'{avg_yt:.0f}%' if avg_yt else '—'}</div>
+        </div>""", unsafe_allow_html=True)
+
+        st.markdown("---")
+
+        # ---- Publication timeline ----
+        st.markdown("#### Timeline des publications (30 derniers jours)")
+        pub_timeline = analytics.get("pub_timeline", [])
+        if pub_timeline:
+            timeline_data = {}
+            for entry in pub_timeline:
+                day = entry.get("day", "")
+                status = entry.get("status", "other")
+                cnt = entry.get("cnt", 0)
+                if day not in timeline_data:
+                    timeline_data[day] = {"posted": 0, "scheduled": 0, "processing": 0}
+                if status in timeline_data[day]:
+                    timeline_data[day][status] = cnt
+            if timeline_data:
+                st.bar_chart(timeline_data)
+        else:
+            st.caption("Aucune publication dans les 30 derniers jours.")
+
+        st.markdown("---")
+
+        # ---- Modification effectiveness ----
+        st.markdown("#### Modifications les plus efficaces (variations >=70%)")
+        mod_samples = analytics.get("high_score_mod_samples", [])
+        if mod_samples:
+            mod_counts = {}
+            for mods in mod_samples:
+                if isinstance(mods, list):
+                    for m in mods:
+                        name = m if isinstance(m, str) else m.get("name", str(m))
+                        mod_counts[name] = mod_counts.get(name, 0) + 1
+                elif isinstance(mods, dict):
+                    for k in mods:
+                        mod_counts[k] = mod_counts.get(k, 0) + 1
+            if mod_counts:
+                sorted_mods = sorted(mod_counts.items(), key=lambda x: -x[1])
+                for mod_name, count in sorted_mods:
+                    pct = round(count / len(mod_samples) * 100)
+                    st.markdown(f"""
+                    <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+                        <code style="min-width:120px;color:#66cc8a">{mod_name}</code>
+                        <div style="flex:1;background:#2A2A2E;border-radius:4px;overflow:hidden;height:18px">
+                            <div style="width:{pct}%;height:100%;background:#66cc8a;border-radius:4px"></div>
+                        </div>
+                        <span style="color:#8E8E93;font-size:12px;min-width:70px;text-align:right">{count}x ({pct}%)</span>
+                    </div>""", unsafe_allow_html=True)
+            else:
+                st.caption("Pas assez de donnees.")
+        else:
+            st.caption("Aucune variation avec score >=70% enregistree.")
+
+        st.markdown("---")
+
+        # ---- Recent sessions ----
+        st.markdown("#### Dernieres sessions")
+        recent = analytics.get("recent_sessions", [])
+        if recent:
+            for sess in recent:
+                mode_badge = sess.get("mode", "?")
+                created = sess.get("created_at", "")[:16]
+                src_url = sess.get("source_url", "")
+                vs = sess.get("virality_score")
+                n_var = sess.get("num_variations", 0)
+                intensity = sess.get("intensity", "")
+                vs_str = f" | Viralite: {vs:.0f}%" if vs else ""
+                url_str = f" | {src_url[:40]}..." if src_url and len(src_url) > 40 else (f" | {src_url}" if src_url else "")
+                st.markdown(f"""
+                <div style="background:#1A1A1E;border-radius:8px;padding:10px 14px;margin-bottom:6px;
+                            display:flex;align-items:center;gap:12px;border-left:3px solid #66cc8a">
+                    <span style="background:#66cc8a22;color:#66cc8a;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600">
+                        {mode_badge}
+                    </span>
+                    <span style="color:#F5F5F7;font-size:13px;flex:1">
+                        {n_var} variations | {intensity}{vs_str}{url_str}
+                    </span>
+                    <span style="color:#636366;font-size:11px">{created}</span>
+                </div>""", unsafe_allow_html=True)
+        else:
+            st.caption("Aucune session enregistree.")
+
+        # ---- Folder breakdown (preserved from original) ----
+        if os.path.exists(output_dir):
+            st.markdown("---")
+            st.markdown("#### Arborescence des dossiers")
+            folders = [f for f in os.listdir(output_dir) if os.path.isdir(os.path.join(output_dir, f))]
             farm_folders = [f for f in sorted(folders, reverse=True) if "FERME" in f]
             bulk_folders = [f for f in sorted(folders, reverse=True) if "BULK" in f]
             other_folders = [f for f in sorted(folders, reverse=True) if "FERME" not in f and "BULK" not in f]
 
             if farm_folders:
-                st.markdown("#### 🏭 Sessions Ferme")
+                st.markdown("**🏭 Ferme**")
                 for f in farm_folders:
-                    n = len(list(Path(os.path.join(output_dir,f)).rglob("*.mp4")))
+                    n = len(list(Path(os.path.join(output_dir, f)).rglob("*.mp4")))
                     st.text(f"  📁 {f} — {n} videos")
-
             if bulk_folders:
-                st.markdown("#### 📦 Sessions Bulk")
+                st.markdown("**📦 Bulk**")
                 for f in bulk_folders:
-                    n = len(list(Path(os.path.join(output_dir,f)).rglob("*.mp4")))
+                    n = len(list(Path(os.path.join(output_dir, f)).rglob("*.mp4")))
                     st.text(f"  📁 {f} — {n} videos")
-
             if other_folders:
-                st.markdown("#### 📤 Sessions Single / Import")
+                st.markdown("**📤 Single / Import**")
                 for f in other_folders:
-                    n = len(list(Path(os.path.join(output_dir,f)).rglob("*.mp4")))
+                    n = len(list(Path(os.path.join(output_dir, f)).rglob("*.mp4")))
                     st.text(f"  📁 {f} — {n} videos")
-        else:
-            st.info("Aucune donnee — lance une generation pour voir les stats")
 
 
 if __name__ == "__main__":
