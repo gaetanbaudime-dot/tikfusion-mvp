@@ -203,18 +203,21 @@ def uniquify_video_ffmpeg(input_path, output_path, intensity="medium", enabled_m
     }
 
     # === BUILD COMMAND ===
-    cmd = ["ffmpeg", "-y", "-threads", "2", "-i", input_path]
+    cmd = ["ffmpeg", "-y", "-threads", "0", "-i", input_path]
     cmd.extend(["-vf", video_filter])
+    cmd.extend(["-filter_threads", "0"])
     if audio_filter:
         cmd.extend(["-af", audio_filter])
 
     cmd.extend([
         "-c:v", "libx264", "-crf", str(crf), "-preset", "ultrafast",
         "-tune", "fastdecode",
+        "-x264opts", "no-deblock",
         "-g", str(gop_size), "-bf", str(bf_count),
         "-c:a", "aac", "-b:a", "96k",
         "-movflags", "+faststart",
-        "-threads", "2",
+        "-sn", "-dn",
+        "-threads", "0",
     ])
 
     # Metadata (only if enabled)
