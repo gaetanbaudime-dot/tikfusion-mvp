@@ -1,5 +1,5 @@
 """
-TikFusion v8.3 — Professional video uniquifier for TikTok, Instagram & YouTube
+TikFusion v7 — Professional video uniquifier for TikTok, Instagram & YouTube
 Import URL | Single | Bulk | Ferme | Statistiques | Configuration
 """
 import streamlit as st
@@ -24,18 +24,6 @@ from database import (
 )
 
 from uniqueness_checker import UniquenessChecker
-
-
-def _find_ffmpeg():
-    ff = shutil.which("ffmpeg")
-    if ff:
-        return ff
-    for p in ["/usr/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/app/.apt/usr/bin/ffmpeg"]:
-        if os.path.isfile(p):
-            return p
-    return "ffmpeg"
-
-FFMPEG_BIN = _find_ffmpeg()
 
 init_db()
 _uniqueness_checker = UniquenessChecker()
@@ -216,16 +204,10 @@ def estimate_uniqueness(modifications):
 
 
 def get_dated_folder_name():
-    """Nom de dossier SANS espaces — compatible Streamlit Cloud"""
-    return datetime.now().strftime("%Y%m%d_%H%M%S")
-
-
-def safe_filename(name, max_len=40):
-    """Nettoyer un nom de fichier — pas d'espaces, pas de chars speciaux, longueur limitee"""
-    import re
-    clean = re.sub(r'[^\w\-]', '_', name)
-    clean = re.sub(r'_+', '_', clean).strip('_')
-    return clean[:max_len] if len(clean) > max_len else clean
+    now = datetime.now()
+    m = {1:"janvier",2:"fevrier",3:"mars",4:"avril",5:"mai",6:"juin",
+         7:"juillet",8:"aout",9:"septembre",10:"octobre",11:"novembre",12:"decembre"}
+    return f"{now.day} {m[now.month]} {now.strftime('%Hh%M')}"
 
 
 def format_tags(mods):
@@ -260,7 +242,7 @@ def extract_thumbnail(video_path):
     thumb = video_path + ".thumb.jpg"
     if os.path.exists(thumb): return thumb
     try:
-        subprocess.run([FFMPEG_BIN,"-y","-i",video_path,"-vf","thumbnail,scale=160:-1",
+        subprocess.run(["ffmpeg","-y","-i",video_path,"-vf","thumbnail,scale=160:-1",
                         "-frames:v","1","-q:v","5",thumb], capture_output=True, timeout=10)
         return thumb if os.path.exists(thumb) else None
     except Exception:
@@ -276,21 +258,20 @@ def thumb_b64(path):
     return None
 
 
-def build_zip_from_analyses(analyses, prefix=""):
-    """Construire un ZIP en memoire a partir d'une liste d'analyses"""
+def build_zip_from_analyses(analyses):
+    """ZIP en memoire a partir d'une liste d'analyses (Single/URL)"""
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
         for a in analyses:
             p = a.get('output_path', '')
             if p and os.path.exists(p):
-                arcname = f"{prefix}{a['name']}.mp4" if prefix else f"{a['name']}.mp4"
-                zf.write(p, arcname)
+                zf.write(p, f"{a['name']}.mp4")
     buf.seek(0)
     return buf.getvalue()
 
 
 def build_zip_from_bulk_results(results, filter_safe=False):
-    """Construire un ZIP a partir des resultats bulk/farm (structure: video_name/V01.mp4)"""
+    """ZIP en memoire a partir des resultats bulk/farm (video_name/V01.mp4)"""
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
         for r in results:
@@ -339,7 +320,7 @@ def download_from_url(url):
         if src.endswith('.mp4'):
             shutil.move(src, final.name)
         else:
-            r = subprocess.run([FFMPEG_BIN,"-y","-i",src,"-c:v","libx264","-c:a","aac",
+            r = subprocess.run(["ffmpeg","-y","-i",src,"-c:v","libx264","-c:a","aac",
                                 "-preset","ultrafast",final.name], capture_output=True, timeout=120)
             if r.returncode != 0:
                 shutil.rmtree(tmpdir, ignore_errors=True)
@@ -1140,51 +1121,37 @@ def main():
             files = st.file_uploader("📹 Plusieurs videos", type=['mp4','mov','avi'],
                                      accept_multiple_files=True, key="bulk_files")
             if files:
-                if len(files) > 20:
-                    st.warning("⚠️ Max 20 videos en bulk.")
-                    files = files[:20]
+                if len(files) > 10:
+                    st.warning("⚠️ Max 10 videos.")
+                    files = files[:10]
                 st.success(f"{len(files)} videos selectionnees")
                 for f in files[:3]: st.caption(f"📹 {f.name}")
                 if len(files) > 3: st.caption(f"... +{len(files)-3} autres")
 
-                vpv = st.slider("Var / video", 1, 10, 5, key="bulk_vars")
-                total_gen = len(files) * vpv
-                est_min = (total_gen * 8) // 60
-                st.info(f"**{total_gen} videos** au total (~{est_min}min)")
+                vpv = st.slider("Var / video", 1, 10, 3, key="bulk_vars")
+                st.info(f"**{len(files) * vpv} videos** au total")
 
                 if st.button("Lancer", type="primary", key="bulk_gen", use_container_width=True):
-                    bf = get_dated_folder_name() + "_BULK"
+                    bf = get_dated_folder_name() + " BULK"
                     bp = os.path.join(output_dir, bf)
                     os.makedirs(bp, exist_ok=True)
                     prog = st.progress(0); stat = st.empty()
                     all_res = []
-                    completed_total = 0
-                    first_error_shown = False
                     try:
                         from uniquifier import uniquify_video_ffmpeg
-
-                        # Sauvegarder TOUS les fichiers sur disque d'abord
-                        temp_paths = []
-                        for uf in files:
+                        for vi, uf in enumerate(files):
+                            vname = Path(uf.name).stem
+                            stat.text(f"⏳ [{vi+1}/{len(files)}] {vname}")
                             tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
                             tmp.write(uf.read()); tmp.close()
-                            temp_paths.append((safe_filename(Path(uf.name).stem), tmp.name))
-
-                        for vi, (vname, vpath) in enumerate(temp_paths):
-                            fsize = os.path.getsize(vpath)
-                            if fsize < 1000:
-                                try: os.unlink(vpath)
-                                except: pass
-                                continue
 
                             vfolder = os.path.join(bp, vname)
                             os.makedirs(vfolder, exist_ok=True)
                             vr = {'name': vname, 'variations': [], 'success_count': 0}
 
                             for j in range(vpv):
-                                stat.text(f"⏳ [{vi+1}/{len(temp_paths)}] {vname} — V{j+1:02d}/{vpv}")
                                 op = os.path.join(vfolder, f"V{j+1:02d}.mp4")
-                                r = uniquify_video_ffmpeg(vpath, op, intensity, enabled_mods)
+                                r = uniquify_video_ffmpeg(tmp.name, op, intensity, enabled_mods)
                                 if r["success"]:
                                     mods = r.get("modifications",{})
                                     a = estimate_uniqueness(mods)
@@ -1194,33 +1161,23 @@ def main():
                                         'thumbnail': extract_thumbnail(op)
                                     })
                                     vr['success_count'] += 1
-                                elif not first_error_shown:
-                                    # Afficher la PREMIERE erreur FFmpeg complete pour debug
-                                    first_error_shown = True
-                                    st.warning(f"⚠️ FFmpeg error on {vname}/V{j+1:02d}:")
-                                    st.code(str(r.get("error",""))[-500:], language=None)
-                                completed_total += 1
-                                prog.progress(completed_total / total_gen)
 
-                            vr['captions_overlay'] = []
-                            vr['original_texts'] = []
+                            # OCR captions for this video
+                            caps, orig = generate_captions_from_ocr(tmp.name)
+                            vr['captions_overlay'] = caps
+                            vr['original_texts'] = orig
                             vr['descriptions'] = generate_descriptions()
+
                             all_res.append(vr)
-                            try: os.unlink(vpath)
-                            except: pass
+                            os.unlink(tmp.name)
+                            prog.progress((vi+1)/len(files))
 
                         st.session_state['bulk_results'] = all_res
                         st.session_state['bulk_folder'] = bf
-                        stat.empty(); prog.empty()
-                        total_ok = sum(r['success_count'] for r in all_res)
-                        if total_ok > 0:
-                            st.success(f"✅ {total_ok}/{total_gen} videos generees")
-                        else:
-                            st.error(f"❌ 0/{total_gen} — FFmpeg echoue. Voir erreur ci-dessus.")
+                        stat.empty()
+                        st.success(f"✅ {sum(r['success_count'] for r in all_res)} videos")
                     except Exception as e:
-                        st.error(f"💥 {e}")
-                        import traceback
-                        st.code(traceback.format_exc(), language=None)
+                        st.error(f"Erreur: {e}")
 
         with col_r:
             if 'bulk_results' in st.session_state:
@@ -1235,7 +1192,7 @@ def main():
                 m1,m2,m3 = st.columns(3)
                 m1.metric("📹 Total", total)
                 m2.metric("📊 Moy.", f"{avg:.0f}%")
-                m3.metric("🟢 Safe Instagram", f"{safe}/{len(allv)}")
+                m3.metric("✅ Safe Instagram", f"{safe}/{len(allv)}")
 
                 # === 2 ZIP BUTTONS ===
                 z1, z2 = st.columns(2)
@@ -1272,10 +1229,9 @@ def main():
                                             mime="video/mp4", key=f"dlb_{r['name']}_{v['name']}",
                                             use_container_width=True)
 
-                        # Video previews — max 6 previews per video to save memory
-                        show_vars = r['variations'][:6]
-                        pcols = st.columns(min(3, max(1, len(show_vars))))
-                        for i, v in enumerate(show_vars):
+                        # Video previews
+                        pcols = st.columns(min(3, max(1, len(r['variations']))))
+                        for i, v in enumerate(r['variations']):
                             p = v.get('output_path','')
                             if p and os.path.exists(p):
                                 with pcols[i % 3]:
@@ -1283,8 +1239,6 @@ def main():
                                     u = v['uniqueness']
                                     bc, _ = get_badge(u)
                                     st.markdown(f'<div style="text-align:center;margin-top:-6px;font-size:.75rem;color:#86868B">{v["name"]} <span class="{bc}" style="font-size:.68rem;padding:1px 6px">{u:.0f}%</span></div>', unsafe_allow_html=True)
-                        if len(r['variations']) > 6:
-                            st.caption(f"... +{len(r['variations'])-6} autres (telecharger le ZIP pour tout voir)")
 
                         # Captions + Descriptions per video
                         if r.get('captions_overlay'):
@@ -1378,14 +1332,14 @@ def main():
 
                     from uniquifier import uniquify_video_ffmpeg
 
-                    farm_folder = get_dated_folder_name() + "_FERME"
+                    farm_folder = get_dated_folder_name() + " FERME"
                     farm_path = os.path.join(output_dir, farm_folder)
                     os.makedirs(farm_path, exist_ok=True)
 
                     farm_results = []
 
                     for vi, (vname_full, vpath) in enumerate(temp_paths):
-                        video_name = safe_filename(Path(vname_full).stem)
+                        video_name = Path(vname_full).stem
                         video_folder = os.path.join(farm_path, video_name)
                         os.makedirs(video_folder, exist_ok=True)
 
