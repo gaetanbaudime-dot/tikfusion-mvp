@@ -632,7 +632,9 @@ def run_generation(input_path, num_vars, output_dir, intensity, enabled_mods, pr
                    session_mode="single", source_url=None, source_platform=None, virality_score=None):
     from uniquifier import uniquify_video_ffmpeg
     folder = get_dated_folder_name()
-    out_dir = os.path.join(output_dir, folder)
+    # Utiliser /tmp sur Streamlit Cloud pour eviter les problemes de permissions
+    safe_output = os.path.join(tempfile.gettempdir(), "tikfusion_output")
+    out_dir = os.path.join(safe_output, folder)
     os.makedirs(out_dir, exist_ok=True)
 
     # Prepare all output paths
@@ -1136,11 +1138,15 @@ def main():
 
                 if st.button("Lancer", type="primary", key="bulk_gen", use_container_width=True):
                     bf = get_dated_folder_name() + " BULK"
-                    bp = os.path.join(output_dir, bf)
+                    # Utiliser /tmp sur Streamlit Cloud pour eviter les problemes de permissions
+                    bulk_base = os.path.join(tempfile.gettempdir(), "tikfusion_bulk")
+                    bp = os.path.join(bulk_base, bf)
                     os.makedirs(bp, exist_ok=True)
                     prog = st.progress(0); stat = st.empty()
+                    errors_log = st.empty()
                     all_res = []
                     completed_total = 0
+                    errors = []
                     try:
                         from uniquifier import uniquify_video_ffmpeg
                         for vi, uf in enumerate(files):
@@ -1148,6 +1154,14 @@ def main():
                             # Ecrire sur disque immediatement, liberer la memoire
                             tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
                             tmp.write(uf.read()); tmp.close()
+
+                            # Verifier que le fichier source est valide
+                            fsize = os.path.getsize(tmp.name)
+                            if fsize < 1000:
+                                errors.append(f"{vname}: fichier trop petit ({fsize}B)")
+                                try: os.unlink(tmp.name)
+                                except Exception: pass
+                                continue
 
                             vfolder = os.path.join(bp, vname)
                             os.makedirs(vfolder, exist_ok=True)
@@ -1166,6 +1180,12 @@ def main():
                                         'thumbnail': extract_thumbnail(op)
                                     })
                                     vr['success_count'] += 1
+                                else:
+                                    err_msg = r.get("error", "Erreur inconnue")
+                                    # Tronquer les erreurs longues
+                                    if isinstance(err_msg, str) and len(err_msg) > 200:
+                                        err_msg = err_msg[-200:]
+                                    errors.append(f"{vname}/V{j+1:02d}: {err_msg}")
                                 completed_total += 1
                                 prog.progress(completed_total / total_gen)
 
@@ -1183,9 +1203,21 @@ def main():
                         st.session_state['bulk_results'] = all_res
                         st.session_state['bulk_folder'] = bf
                         stat.empty(); prog.empty()
-                        st.success(f"✅ {sum(r['success_count'] for r in all_res)} videos generees")
+                        total_ok = sum(r['success_count'] for r in all_res)
+                        if total_ok > 0:
+                            st.success(f"✅ {total_ok} videos generees")
+                        else:
+                            st.error("❌ Aucune video generee")
+                        if errors:
+                            with errors_log.expander(f"⚠️ {len(errors)} erreur(s) FFmpeg", expanded=True):
+                                for e in errors[:10]:
+                                    st.code(e, language=None)
+                                if len(errors) > 10:
+                                    st.caption(f"... +{len(errors)-10} autres erreurs")
                     except Exception as e:
-                        st.error(f"Erreur: {e}")
+                        st.error(f"Erreur critique: {e}")
+                        import traceback
+                        st.code(traceback.format_exc(), language=None)
 
         with col_r:
             if 'bulk_results' in st.session_state:
@@ -1344,7 +1376,8 @@ def main():
                     from uniquifier import uniquify_video_ffmpeg
 
                     farm_folder = get_dated_folder_name() + " FERME"
-                    farm_path = os.path.join(output_dir, farm_folder)
+                    farm_base = os.path.join(tempfile.gettempdir(), "tikfusion_farm")
+                    farm_path = os.path.join(farm_base, farm_folder)
                     os.makedirs(farm_path, exist_ok=True)
 
                     farm_results = []
