@@ -1,5 +1,5 @@
 """
-TikFusion v7.1 — Professional video uniquifier for TikTok, Instagram & YouTube
+TikFusion v8 — Professional video uniquifier for TikTok, Instagram & YouTube
 Import URL | Single | Bulk | Ferme | Statistiques | Configuration
 """
 import streamlit as st
@@ -256,6 +256,34 @@ def thumb_b64(path):
         with open(thumb, 'rb') as f:
             return base64.b64encode(f.read()).decode()
     return None
+
+
+def build_zip_from_analyses(analyses, prefix=""):
+    """Construire un ZIP en memoire a partir d'une liste d'analyses"""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for a in analyses:
+            p = a.get('output_path', '')
+            if p and os.path.exists(p):
+                arcname = f"{prefix}{a['name']}.mp4" if prefix else f"{a['name']}.mp4"
+                zf.write(p, arcname)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def build_zip_from_bulk_results(results, filter_safe=False):
+    """Construire un ZIP a partir des resultats bulk/farm (structure: video_name/V01.mp4)"""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for r in results:
+            for v in r['variations']:
+                if filter_safe and v['uniqueness'] < 60:
+                    continue
+                p = v.get('output_path', '')
+                if p and os.path.exists(p):
+                    zf.write(p, f"{r['name']}/{v['name']}.mp4")
+    buf.seek(0)
+    return buf.getvalue()
 
 
 # ============ URL DOWNLOAD ============
@@ -726,7 +754,9 @@ def render_results(analyses, folder, prefix, virality=None, captions_overlay=Non
     avg = sum(a['uniqueness'] for a in analyses) / len(analyses)
     safe = sum(1 for a in analyses if a['uniqueness'] >= 60)
 
-    top1, top2, top3 = st.columns([2, 1.5, 1.5])
+    safe_analyses = [a for a in analyses if a['uniqueness'] >= 60]
+
+    top1, top2, top3, top4 = st.columns([2, 1.5, 1, 1])
     with top1:
         st.markdown(f"<div class='folder-badge'>📁 {folder}/</div>", unsafe_allow_html=True)
     with top2:
@@ -735,16 +765,18 @@ def render_results(analyses, folder, prefix, virality=None, captions_overlay=Non
             📊 Moy. <b style="color:#F5F5F7">{avg:.0f}%</b> &nbsp; ✅ <b style="color:#30D158">{safe}/{len(analyses)}</b> safe
         </div>""", unsafe_allow_html=True)
     with top3:
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
-            for a in analyses:
-                p = a.get('output_path','')
-                if p and os.path.exists(p):
-                    zf.write(p, f"{a['name']}.mp4")
-        buf.seek(0)
-        st.download_button("📦 ZIP Tout", buf.getvalue(),
+        zip_all = build_zip_from_analyses(analyses)
+        st.download_button("📦 Tout", zip_all,
                            file_name=f"{folder}.zip", mime="application/zip",
                            key=f"zip_{prefix}", use_container_width=True)
+    with top4:
+        if safe_analyses:
+            zip_safe = build_zip_from_analyses(safe_analyses)
+            st.download_button("🟢 Safe IG", zip_safe,
+                               file_name=f"{folder}_safe_instagram.zip", mime="application/zip",
+                               key=f"zipsafe_{prefix}", use_container_width=True)
+        else:
+            st.markdown('<div style="font-size:0.7rem;color:#FF453A;text-align:center;padding:8px">Aucune safe</div>', unsafe_allow_html=True)
 
     st.markdown("""<div class="legend">🟢 ≥60% = Safe Instagram (toutes plateformes) &nbsp;|&nbsp; 🟠 30-59% = Safe TikTok seulement &nbsp;|&nbsp; 🔴 <30% = Risque detection</div>""", unsafe_allow_html=True)
 
@@ -1090,15 +1122,17 @@ def main():
             files = st.file_uploader("📹 Plusieurs videos", type=['mp4','mov','avi'],
                                      accept_multiple_files=True, key="bulk_files")
             if files:
-                if len(files) > 10:
-                    st.warning("⚠️ Max 10 videos.")
-                    files = files[:10]
+                if len(files) > 20:
+                    st.warning("⚠️ Max 20 videos en bulk.")
+                    files = files[:20]
                 st.success(f"{len(files)} videos selectionnees")
                 for f in files[:3]: st.caption(f"📹 {f.name}")
                 if len(files) > 3: st.caption(f"... +{len(files)-3} autres")
 
-                vpv = st.slider("Var / video", 1, 10, 3, key="bulk_vars")
-                st.info(f"**{len(files) * vpv} videos** au total")
+                vpv = st.slider("Var / video", 1, 10, 5, key="bulk_vars")
+                total_gen = len(files) * vpv
+                est_min = (total_gen * 8) // 60
+                st.info(f"**{total_gen} videos** au total (~{est_min}min)")
 
                 if st.button("Lancer", type="primary", key="bulk_gen", use_container_width=True):
                     bf = get_dated_folder_name() + " BULK"
@@ -1106,11 +1140,12 @@ def main():
                     os.makedirs(bp, exist_ok=True)
                     prog = st.progress(0); stat = st.empty()
                     all_res = []
+                    completed_total = 0
                     try:
                         from uniquifier import uniquify_video_ffmpeg
                         for vi, uf in enumerate(files):
                             vname = Path(uf.name).stem
-                            stat.text(f"⏳ [{vi+1}/{len(files)}] {vname}")
+                            # Ecrire sur disque immediatement, liberer la memoire
                             tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
                             tmp.write(uf.read()); tmp.close()
 
@@ -1119,6 +1154,7 @@ def main():
                             vr = {'name': vname, 'variations': [], 'success_count': 0}
 
                             for j in range(vpv):
+                                stat.text(f"⏳ [{vi+1}/{len(files)}] {vname} — V{j+1:02d}/{vpv}")
                                 op = os.path.join(vfolder, f"V{j+1:02d}.mp4")
                                 r = uniquify_video_ffmpeg(tmp.name, op, intensity, enabled_mods)
                                 if r["success"]:
@@ -1130,6 +1166,8 @@ def main():
                                         'thumbnail': extract_thumbnail(op)
                                     })
                                     vr['success_count'] += 1
+                                completed_total += 1
+                                prog.progress(completed_total / total_gen)
 
                             # OCR captions for this video
                             caps, orig = generate_captions_from_ocr(tmp.name)
@@ -1138,13 +1176,14 @@ def main():
                             vr['descriptions'] = generate_descriptions()
 
                             all_res.append(vr)
-                            os.unlink(tmp.name)
-                            prog.progress((vi+1)/len(files))
+                            # Liberer le fichier temp source immediatement
+                            try: os.unlink(tmp.name)
+                            except Exception: pass
 
                         st.session_state['bulk_results'] = all_res
                         st.session_state['bulk_folder'] = bf
-                        stat.empty()
-                        st.success(f"✅ {sum(r['success_count'] for r in all_res)} videos")
+                        stat.empty(); prog.empty()
+                        st.success(f"✅ {sum(r['success_count'] for r in all_res)} videos generees")
                     except Exception as e:
                         st.error(f"Erreur: {e}")
 
@@ -1161,20 +1200,23 @@ def main():
                 m1,m2,m3 = st.columns(3)
                 m1.metric("📹 Total", total)
                 m2.metric("📊 Moy.", f"{avg:.0f}%")
-                m3.metric("✅ Safe Instagram", f"{safe}/{len(allv)}")
+                m3.metric("🟢 Safe Instagram", f"{safe}/{len(allv)}")
 
-                # ZIP all
-                buf = io.BytesIO()
-                with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
-                    for r in results:
-                        for v in r['variations']:
-                            p = v.get('output_path','')
-                            if p and os.path.exists(p):
-                                zf.write(p, f"{r['name']}/{v['name']}.mp4")
-                buf.seek(0)
-                st.download_button("📦 Tout telecharger (ZIP)", buf.getvalue(),
-                                   file_name=f"{bf}.zip", mime="application/zip",
-                                   key="zip_bulk", use_container_width=True)
+                # === 2 ZIP BUTTONS ===
+                z1, z2 = st.columns(2)
+                with z1:
+                    zip_all = build_zip_from_bulk_results(results, filter_safe=False)
+                    st.download_button("📦 Tout telecharger (ZIP)", zip_all,
+                                       file_name=f"{bf}.zip", mime="application/zip",
+                                       key="zip_bulk", use_container_width=True)
+                with z2:
+                    if safe > 0:
+                        zip_safe = build_zip_from_bulk_results(results, filter_safe=True)
+                        st.download_button(f"🟢 Safe Instagram ({safe} videos)", zip_safe,
+                                           file_name=f"{bf}_safe_instagram.zip", mime="application/zip",
+                                           key="zipsafe_bulk", use_container_width=True)
+                    else:
+                        st.markdown('<div style="background:#1C1C1E;border:1px solid #FF453A;border-radius:8px;padding:8px;text-align:center;font-size:0.78rem;color:#FF453A">Aucune variation safe Instagram</div>', unsafe_allow_html=True)
 
                 st.markdown("""<div class="legend">🟢 ≥60% = Safe Instagram &nbsp;|&nbsp; 🟠 30-59% = Safe TikTok seulement &nbsp;|&nbsp; 🔴 <30% = Risque</div>""", unsafe_allow_html=True)
 
@@ -1195,9 +1237,10 @@ def main():
                                             mime="video/mp4", key=f"dlb_{r['name']}_{v['name']}",
                                             use_container_width=True)
 
-                        # Video previews
-                        pcols = st.columns(min(3, max(1, len(r['variations']))))
-                        for i, v in enumerate(r['variations']):
+                        # Video previews — max 6 previews per video to save memory
+                        show_vars = r['variations'][:6]
+                        pcols = st.columns(min(3, max(1, len(show_vars))))
+                        for i, v in enumerate(show_vars):
                             p = v.get('output_path','')
                             if p and os.path.exists(p):
                                 with pcols[i % 3]:
@@ -1205,6 +1248,8 @@ def main():
                                     u = v['uniqueness']
                                     bc, _ = get_badge(u)
                                     st.markdown(f'<div style="text-align:center;margin-top:-6px;font-size:.75rem;color:#86868B">{v["name"]} <span class="{bc}" style="font-size:.68rem;padding:1px 6px">{u:.0f}%</span></div>', unsafe_allow_html=True)
+                        if len(r['variations']) > 6:
+                            st.caption(f"... +{len(r['variations'])-6} autres (telecharger le ZIP pour tout voir)")
 
                         # Captions + Descriptions per video
                         if r.get('captions_overlay'):
@@ -1392,18 +1437,21 @@ def main():
                 m3.metric("📊 Score moyen", f"{avg:.0f}%")
                 m4.metric("🟢 Safe Instagram", f"{safe}/{total}")
 
-                # Global ZIP
-                buf = io.BytesIO()
-                with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
-                    for r in results:
-                        for v in r['variations']:
-                            p = v.get('output_path', '')
-                            if p and os.path.exists(p):
-                                zf.write(p, f"{r['name']}/{v['name']}.mp4")
-                buf.seek(0)
-                st.download_button("📦 Tout telecharger (ZIP)", buf.getvalue(),
-                                   file_name=f"{farm_folder}.zip", mime="application/zip",
-                                   key="zip_farm", use_container_width=True)
+                # === 2 ZIP BUTTONS ===
+                z1, z2 = st.columns(2)
+                with z1:
+                    zip_all = build_zip_from_bulk_results(results, filter_safe=False)
+                    st.download_button("📦 Tout telecharger (ZIP)", zip_all,
+                                       file_name=f"{farm_folder}.zip", mime="application/zip",
+                                       key="zip_farm", use_container_width=True)
+                with z2:
+                    if safe > 0:
+                        zip_safe = build_zip_from_bulk_results(results, filter_safe=True)
+                        st.download_button(f"🟢 Safe Instagram ({safe} videos)", zip_safe,
+                                           file_name=f"{farm_folder}_safe_instagram.zip", mime="application/zip",
+                                           key="zipsafe_farm", use_container_width=True)
+                    else:
+                        st.markdown('<div style="background:#1C1C1E;border:1px solid #FF453A;border-radius:8px;padding:8px;text-align:center;font-size:0.78rem;color:#FF453A">Aucune variation safe Instagram</div>', unsafe_allow_html=True)
 
                 st.markdown("""<div class="legend">🟢 ≥60% = Safe Instagram &nbsp;|&nbsp; 🟠 30-59% = Safe TikTok seulement &nbsp;|&nbsp; 🔴 <30% = Risque</div>""", unsafe_allow_html=True)
 
