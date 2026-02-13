@@ -4,6 +4,7 @@ Each modification can be toggled on/off via enabled_mods parameter.
 Parallel batch processing with ThreadPoolExecutor.
 """
 import subprocess
+import shutil
 import os
 import random
 import string
@@ -17,6 +18,20 @@ try:
     locale.setlocale(locale.LC_TIME, 'fr_FR.UTF-8')
 except:
     pass
+
+
+def _find_ffmpeg():
+    """Trouver le binaire ffmpeg — cherche dans PATH puis dans les chemins courants"""
+    ff = shutil.which("ffmpeg")
+    if ff:
+        return ff
+    for p in ["/usr/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/app/.apt/usr/bin/ffmpeg"]:
+        if os.path.isfile(p):
+            return p
+    return "ffmpeg"  # fallback — laisse subprocess lever l'erreur
+
+
+FFMPEG_BIN = _find_ffmpeg()
 
 INTENSITY_PRESETS = {
     "low": {
@@ -203,7 +218,7 @@ def uniquify_video_ffmpeg(input_path, output_path, intensity="medium", enabled_m
     }
 
     # === BUILD COMMAND ===
-    cmd = ["ffmpeg", "-y", "-threads", "0", "-i", input_path]
+    cmd = [FFMPEG_BIN, "-y", "-threads", "0", "-i", input_path]
     cmd.extend(["-vf", video_filter])
     cmd.extend(["-filter_threads", "0"])
     if audio_filter:

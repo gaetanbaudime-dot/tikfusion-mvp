@@ -25,6 +25,18 @@ from database import (
 
 from uniqueness_checker import UniquenessChecker
 
+
+def _find_ffmpeg():
+    ff = shutil.which("ffmpeg")
+    if ff:
+        return ff
+    for p in ["/usr/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/app/.apt/usr/bin/ffmpeg"]:
+        if os.path.isfile(p):
+            return p
+    return "ffmpeg"
+
+FFMPEG_BIN = _find_ffmpeg()
+
 init_db()
 _uniqueness_checker = UniquenessChecker()
 
@@ -248,7 +260,7 @@ def extract_thumbnail(video_path):
     thumb = video_path + ".thumb.jpg"
     if os.path.exists(thumb): return thumb
     try:
-        subprocess.run(["ffmpeg","-y","-i",video_path,"-vf","thumbnail,scale=160:-1",
+        subprocess.run([FFMPEG_BIN,"-y","-i",video_path,"-vf","thumbnail,scale=160:-1",
                         "-frames:v","1","-q:v","5",thumb], capture_output=True, timeout=10)
         return thumb if os.path.exists(thumb) else None
     except Exception:
@@ -327,7 +339,7 @@ def download_from_url(url):
         if src.endswith('.mp4'):
             shutil.move(src, final.name)
         else:
-            r = subprocess.run(["ffmpeg","-y","-i",src,"-c:v","libx264","-c:a","aac",
+            r = subprocess.run([FFMPEG_BIN,"-y","-i",src,"-c:v","libx264","-c:a","aac",
                                 "-preset","ultrafast",final.name], capture_output=True, timeout=120)
             if r.returncode != 0:
                 shutil.rmtree(tmpdir, ignore_errors=True)
