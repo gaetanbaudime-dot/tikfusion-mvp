@@ -1,5 +1,5 @@
 """
-TikFusion v8 — Professional video uniquifier for TikTok, Instagram & YouTube
+TikFusion v8.3 — Professional video uniquifier for TikTok, Instagram & YouTube
 Import URL | Single | Bulk | Ferme | Statistiques | Configuration
 """
 import streamlit as st
@@ -638,7 +638,7 @@ def run_generation(input_path, num_vars, output_dir, intensity, enabled_mods, pr
                    session_mode="single", source_url=None, source_platform=None, virality_score=None):
     from uniquifier import uniquify_video_ffmpeg
     folder = get_dated_folder_name()
-    out_dir = os.path.join(tempfile.gettempdir(), "tikfusion", folder)
+    out_dir = os.path.join(output_dir, folder)
     os.makedirs(out_dir, exist_ok=True)
 
     # Prepare all output paths
@@ -1142,27 +1142,27 @@ def main():
 
                 if st.button("Lancer", type="primary", key="bulk_gen", use_container_width=True):
                     bf = get_dated_folder_name() + "_BULK"
-                    bp = os.path.join(tempfile.gettempdir(), "tikfusion", bf)
+                    bp = os.path.join(output_dir, bf)
                     os.makedirs(bp, exist_ok=True)
                     prog = st.progress(0); stat = st.empty()
-                    errors_log = st.empty()
                     all_res = []
                     completed_total = 0
-                    errors = []
+                    first_error_shown = False
                     try:
                         from uniquifier import uniquify_video_ffmpeg
-                        for vi, uf in enumerate(files):
-                            vname_raw = Path(uf.name).stem
-                            vname = safe_filename(vname_raw)
-                            # Ecrire sur disque immediatement
+
+                        # Sauvegarder TOUS les fichiers sur disque d'abord
+                        temp_paths = []
+                        for uf in files:
                             tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
                             tmp.write(uf.read()); tmp.close()
+                            temp_paths.append((safe_filename(Path(uf.name).stem), tmp.name))
 
-                            fsize = os.path.getsize(tmp.name)
+                        for vi, (vname, vpath) in enumerate(temp_paths):
+                            fsize = os.path.getsize(vpath)
                             if fsize < 1000:
-                                errors.append(f"{vname}: fichier trop petit ({fsize}B)")
-                                try: os.unlink(tmp.name)
-                                except Exception: pass
+                                try: os.unlink(vpath)
+                                except: pass
                                 continue
 
                             vfolder = os.path.join(bp, vname)
@@ -1170,9 +1170,9 @@ def main():
                             vr = {'name': vname, 'variations': [], 'success_count': 0}
 
                             for j in range(vpv):
-                                stat.text(f"⏳ [{vi+1}/{len(files)}] {vname} — V{j+1:02d}/{vpv}")
+                                stat.text(f"⏳ [{vi+1}/{len(temp_paths)}] {vname} — V{j+1:02d}/{vpv}")
                                 op = os.path.join(vfolder, f"V{j+1:02d}.mp4")
-                                r = uniquify_video_ffmpeg(tmp.name, op, intensity, enabled_mods)
+                                r = uniquify_video_ffmpeg(vpath, op, intensity, enabled_mods)
                                 if r["success"]:
                                     mods = r.get("modifications",{})
                                     a = estimate_uniqueness(mods)
@@ -1182,24 +1182,20 @@ def main():
                                         'thumbnail': extract_thumbnail(op)
                                     })
                                     vr['success_count'] += 1
-                                else:
-                                    err_msg = str(r.get("error", "?"))
-                                    # Extraire la derniere ligne d'erreur FFmpeg (la plus utile)
-                                    err_lines = [l.strip() for l in err_msg.split('\n') if l.strip()]
-                                    short_err = err_lines[-1] if err_lines else err_msg
-                                    if len(short_err) > 300: short_err = short_err[-300:]
-                                    errors.append(f"{vname}/V{j+1:02d}: {short_err}")
+                                elif not first_error_shown:
+                                    # Afficher la PREMIERE erreur FFmpeg complete pour debug
+                                    first_error_shown = True
+                                    st.warning(f"⚠️ FFmpeg error on {vname}/V{j+1:02d}:")
+                                    st.code(str(r.get("error",""))[-500:], language=None)
                                 completed_total += 1
                                 prog.progress(completed_total / total_gen)
 
-                            # Skip OCR on Streamlit Cloud (pytesseract may not work)
-                            vr['captions_overlay'] = generate_captions_from_ocr(tmp.name)[0] if os.path.exists(tmp.name) else []
+                            vr['captions_overlay'] = []
                             vr['original_texts'] = []
                             vr['descriptions'] = generate_descriptions()
-
                             all_res.append(vr)
-                            try: os.unlink(tmp.name)
-                            except Exception: pass
+                            try: os.unlink(vpath)
+                            except: pass
 
                         st.session_state['bulk_results'] = all_res
                         st.session_state['bulk_folder'] = bf
@@ -1208,13 +1204,9 @@ def main():
                         if total_ok > 0:
                             st.success(f"✅ {total_ok}/{total_gen} videos generees")
                         else:
-                            st.error("❌ Aucune video generee — voir erreurs ci-dessous")
-                        if errors:
-                            with errors_log.expander(f"⚠️ {len(errors)} erreur(s)", expanded=total_ok == 0):
-                                for e in errors[:20]:
-                                    st.code(e, language=None)
+                            st.error(f"❌ 0/{total_gen} — FFmpeg echoue. Voir erreur ci-dessus.")
                     except Exception as e:
-                        st.error(f"Erreur critique: {e}")
+                        st.error(f"💥 {e}")
                         import traceback
                         st.code(traceback.format_exc(), language=None)
 
@@ -1375,7 +1367,7 @@ def main():
                     from uniquifier import uniquify_video_ffmpeg
 
                     farm_folder = get_dated_folder_name() + "_FERME"
-                    farm_path = os.path.join(tempfile.gettempdir(), "tikfusion", farm_folder)
+                    farm_path = os.path.join(output_dir, farm_folder)
                     os.makedirs(farm_path, exist_ok=True)
 
                     farm_results = []
