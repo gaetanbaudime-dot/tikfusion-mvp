@@ -1,5 +1,5 @@
 """
-TikFusion v7 — Professional video uniquifier for TikTok, Instagram & YouTube
+TikFusion v7.1 — Professional video uniquifier for TikTok, Instagram & YouTube
 Import URL | Single | Bulk | Ferme | Statistiques | Configuration
 """
 import streamlit as st
