@@ -30,6 +30,20 @@ _uniqueness_checker = UniquenessChecker()
 
 st.set_page_config(page_title="TikFusion x LTP", page_icon="assets/favicon.svg", layout="wide", initial_sidebar_state="collapsed")
 
+# === DIAGNOSTIC FFMPEG (temporaire — a retirer) ===
+import shutil as _shutil
+_ff = _shutil.which("ffmpeg")
+_diag = [f"which ffmpeg = {_ff}"]
+for _p in ["/usr/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/app/.apt/usr/bin/ffmpeg"]:
+    _diag.append(f"{_p}: {'OK' if os.path.isfile(_p) else 'ABSENT'}")
+try:
+    _r = subprocess.run(["ffmpeg", "-version"], capture_output=True, text=True, timeout=5)
+    _diag.append(f"ffmpeg -version: rc={_r.returncode}, {(_r.stdout or _r.stderr)[:80]}")
+except Exception as _e:
+    _diag.append(f"exec error: {_e}")
+st.info("🔧 DIAG: " + " | ".join(_diag))
+# === FIN DIAGNOSTIC ===
+
 # ============ CSS ============
 st.markdown("""
 <style>
