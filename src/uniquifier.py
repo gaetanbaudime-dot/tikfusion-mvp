@@ -8,6 +8,7 @@ import os
 import random
 import string
 import uuid
+import shutil
 from pathlib import Path
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -17,6 +18,30 @@ try:
     locale.setlocale(locale.LC_TIME, 'fr_FR.UTF-8')
 except:
     pass
+
+
+def _find_ffmpeg():
+    """Find ffmpeg binary — system PATH, imageio-ffmpeg, or common locations"""
+    # 1. System PATH
+    p = shutil.which("ffmpeg")
+    if p:
+        return p
+    # 2. imageio-ffmpeg bundled binary
+    try:
+        import imageio_ffmpeg
+        p = imageio_ffmpeg.get_ffmpeg_exe()
+        if p and os.path.exists(p):
+            return p
+    except ImportError:
+        pass
+    # 3. Common system locations
+    for candidate in ["/usr/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/opt/homebrew/bin/ffmpeg"]:
+        if os.path.exists(candidate):
+            return candidate
+    return "ffmpeg"  # last resort — let it fail with a clear error
+
+
+FFMPEG_BIN = _find_ffmpeg()
 
 INTENSITY_PRESETS = {
     "low": {
@@ -203,7 +228,7 @@ def uniquify_video_ffmpeg(input_path, output_path, intensity="medium", enabled_m
     }
 
     # === BUILD COMMAND ===
-    cmd = ["ffmpeg", "-y", "-threads", "0", "-i", input_path]
+    cmd = [FFMPEG_BIN, "-y", "-threads", "0", "-i", input_path]
     cmd.extend(["-vf", video_filter])
     cmd.extend(["-filter_threads", "0"])
     if audio_filter:

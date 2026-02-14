@@ -214,11 +214,22 @@ def get_badge(score):
     return 'badge-danger', 'Risque'
 
 
+def _get_ffmpeg():
+    """Get ffmpeg binary path (cached)"""
+    if not hasattr(_get_ffmpeg, '_path'):
+        try:
+            from uniquifier import FFMPEG_BIN
+            _get_ffmpeg._path = FFMPEG_BIN
+        except ImportError:
+            _get_ffmpeg._path = shutil.which("ffmpeg") or "ffmpeg"
+    return _get_ffmpeg._path
+
+
 def extract_thumbnail(video_path):
     thumb = video_path + ".thumb.jpg"
     if os.path.exists(thumb): return thumb
     try:
-        subprocess.run(["ffmpeg","-y","-i",video_path,"-vf","thumbnail,scale=160:-1",
+        subprocess.run([_get_ffmpeg(),"-y","-i",video_path,"-vf","thumbnail,scale=160:-1",
                         "-frames:v","1","-q:v","5",thumb], capture_output=True, timeout=10)
         return thumb if os.path.exists(thumb) else None
     except Exception:
@@ -266,12 +277,13 @@ def build_zip_from_bulk_results(results, filter_safe=False):
 
 def run_generation(input_path, num_vars, output_dir, intensity, enabled_mods, progress_bar, status_el,
                    session_mode="single", source_url=None, source_platform=None, virality_score=None):
-    from uniquifier import uniquify_video_ffmpeg
+    from uniquifier import uniquify_video_ffmpeg, FFMPEG_BIN
 
     # Check FFmpeg is available
-    ffmpeg_path = shutil.which("ffmpeg")
-    if not ffmpeg_path:
-        st.error("FFmpeg non trouve. Verifie que ffmpeg est installe (packages.txt).")
+    try:
+        subprocess.run([FFMPEG_BIN, "-version"], capture_output=True, timeout=5)
+    except Exception:
+        st.error(f"FFmpeg non trouve (cherche: {FFMPEG_BIN}). Installe imageio-ffmpeg.")
         return [], "error"
 
     folder = get_dated_folder_name()
@@ -666,9 +678,8 @@ def main():
                     prog = st.progress(0); stat = st.empty()
                     all_res = []
                     try:
-                        if not shutil.which("ffmpeg"):
-                            raise RuntimeError("FFmpeg non trouve — verifie packages.txt")
-                        from uniquifier import uniquify_video_ffmpeg
+                        from uniquifier import uniquify_video_ffmpeg, FFMPEG_BIN
+                        subprocess.run([FFMPEG_BIN, "-version"], capture_output=True, timeout=5)
                         for vi, uf in enumerate(files):
                             vname = Path(uf.name).stem
                             stat.text(f"⏳ [{vi+1}/{len(files)}] {vname}")
