@@ -267,6 +267,13 @@ def build_zip_from_bulk_results(results, filter_safe=False):
 def run_generation(input_path, num_vars, output_dir, intensity, enabled_mods, progress_bar, status_el,
                    session_mode="single", source_url=None, source_platform=None, virality_score=None):
     from uniquifier import uniquify_video_ffmpeg
+
+    # Check FFmpeg is available
+    ffmpeg_path = shutil.which("ffmpeg")
+    if not ffmpeg_path:
+        st.error("FFmpeg non trouve. Verifie que ffmpeg est installe (packages.txt).")
+        return [], "error"
+
     folder = get_dated_folder_name()
     out_dir = os.path.join(output_dir, folder)
     os.makedirs(out_dir, exist_ok=True)
@@ -609,12 +616,16 @@ def main():
                     prog = st.progress(0); stat = st.empty()
                     try:
                         analyses, folder = run_generation(tp, nv, output_dir, intensity, enabled_mods, prog, stat)
-                        st.session_state['single_analyses'] = analyses
-                        st.session_state['single_folder'] = folder
                         stat.empty(); prog.empty()
-                        st.success(f"✅ {len(analyses)} variations generees")
+                        if analyses:
+                            st.session_state['single_analyses'] = analyses
+                            st.session_state['single_folder'] = folder
+                            st.success(f"✅ {len(analyses)} variations generees")
+                        else:
+                            st.error("❌ Generation echouee — verifie que ffmpeg est installe")
                     except Exception as e:
-                        st.error(f"Erreur: {e}")
+                        stat.empty(); prog.empty()
+                        st.error(f"❌ Erreur: {e}")
             else:
                 for k in ['single_temp']:
                     if k in st.session_state:
@@ -655,6 +666,8 @@ def main():
                     prog = st.progress(0); stat = st.empty()
                     all_res = []
                     try:
+                        if not shutil.which("ffmpeg"):
+                            raise RuntimeError("FFmpeg non trouve — verifie packages.txt")
                         from uniquifier import uniquify_video_ffmpeg
                         for vi, uf in enumerate(files):
                             vname = Path(uf.name).stem
@@ -685,10 +698,15 @@ def main():
 
                         st.session_state['bulk_results'] = all_res
                         st.session_state['bulk_folder'] = bf
-                        stat.empty()
-                        st.success(f"✅ {sum(r['success_count'] for r in all_res)} videos")
+                        stat.empty(); prog.empty()
+                        total_gen = sum(r['success_count'] for r in all_res)
+                        if total_gen > 0:
+                            st.success(f"✅ {total_gen} videos generees")
+                        else:
+                            st.error("❌ Generation echouee — verifie que ffmpeg est installe")
                     except Exception as e:
-                        st.error(f"Erreur: {e}")
+                        stat.empty(); prog.empty()
+                        st.error(f"❌ Erreur: {e}")
 
         with col_r:
             if 'bulk_results' in st.session_state:
