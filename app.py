@@ -224,11 +224,9 @@ def _modifications_distance(mods_a, mods_b):
 def _generate_with_diversity(input_path, output_path, intensity, enabled_mods,
                              previous_mods_list, min_distance=30, max_retries=5):
     """Generate a variation ensuring sufficient distance from all previous variations.
-    Retries up to max_retries times if the result is too similar to any previous set."""
+    Retries up to max_retries times if the result is too similar to any previous set.
+    Always returns the last attempt so metadata matches the file on disk."""
     from uniquifier import uniquify_video_ffmpeg
-
-    best_result = None
-    best_min_dist = -1
 
     for attempt in range(max_retries + 1):
         r = uniquify_video_ffmpeg(input_path, output_path, intensity, enabled_mods)
@@ -245,20 +243,8 @@ def _generate_with_diversity(input_path, output_path, intensity, enabled_mods,
         if min_dist >= min_distance:
             return r
 
-        # Keep the best attempt so far
-        if min_dist > best_min_dist:
-            best_result = r
-            best_min_dist = min_dist
-
-        # Retry: remove file before regenerating
-        if attempt < max_retries:
-            try:
-                os.remove(output_path)
-            except OSError:
-                pass
-
-    # Return best attempt even if distance is still low
-    return best_result
+    # Return last attempt (matches file on disk) even if distance is still low
+    return r
 
 
 def get_dated_folder_name():
@@ -429,10 +415,24 @@ def run_generation(input_path, num_vars, output_dir, intensity, enabled_mods, pr
         kept_mods = [mods for i, mods in all_mods if i not in to_regenerate]
         for idx in sorted(to_regenerate):
             out = os.path.join(out_dir, f"V{idx+1:02d}.mp4")
+            # Backup original before overwriting
+            backup = out + ".bak"
+            try:
+                shutil.copy2(out, backup)
+            except OSError:
+                backup = None
             r = _generate_with_diversity(input_path, out, intensity, enabled_mods, kept_mods)
-            raw_results[idx] = r
             if r and r.get("success"):
+                raw_results[idx] = r
                 kept_mods.append(r.get("modifications", {}))
+                if backup:
+                    try: os.remove(backup)
+                    except OSError: pass
+            else:
+                # Restore original on failure
+                if backup:
+                    try: shutil.move(backup, out)
+                    except OSError: pass
 
     # Show errors if any
     if errors and not any(r and r.get("success") for r in raw_results):
