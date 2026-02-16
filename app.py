@@ -23,10 +23,7 @@ from database import (
     save_session, save_variation, get_analytics, init_db,
 )
 
-from uniqueness_checker import UniquenessChecker
-
 init_db()
-_uniqueness_checker = UniquenessChecker()
 
 st.set_page_config(page_title="TikFusion x LTP", page_icon="assets/favicon.svg", layout="wide", initial_sidebar_state="collapsed")
 
