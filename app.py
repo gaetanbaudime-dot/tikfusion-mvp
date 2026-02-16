@@ -680,6 +680,8 @@ def main():
                     os.makedirs(bp, exist_ok=True)
                     prog = st.progress(0); stat = st.empty()
                     all_res = []
+                    total_steps = len(files) * vpv
+                    step = 0
                     try:
                         from uniquifier import uniquify_video_ffmpeg, FFMPEG_BIN
                         ok, ffpath, info = _check_ffmpeg()
@@ -689,7 +691,6 @@ def main():
                             raise RuntimeError("FFmpeg unavailable")
                         for vi, uf in enumerate(files):
                             vname = Path(uf.name).stem
-                            stat.text(f"⏳ [{vi+1}/{len(files)}] {vname}")
                             tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
                             tmp.write(uf.read()); tmp.close()
 
@@ -698,6 +699,9 @@ def main():
                             vr = {'name': vname, 'variations': [], 'success_count': 0}
 
                             for j in range(vpv):
+                                step += 1
+                                stat.text(f"⏳ [{step}/{total_steps}] {vname} — V{j+1:02d}")
+                                prog.progress(step / total_steps)
                                 op = os.path.join(vfolder, f"V{j+1:02d}.mp4")
                                 r = uniquify_video_ffmpeg(tmp.name, op, intensity, enabled_mods)
                                 if r["success"]:
@@ -712,7 +716,6 @@ def main():
 
                             all_res.append(vr)
                             os.unlink(tmp.name)
-                            prog.progress((vi+1)/len(files))
 
                         st.session_state['bulk_results'] = all_res
                         st.session_state['bulk_folder'] = bf
