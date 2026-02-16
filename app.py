@@ -176,6 +176,90 @@ def estimate_uniqueness(modifications):
     return {'uniqueness': min(round(score), 100)}
 
 
+def _modifications_distance(mods_a, mods_b):
+    """Compare 2 sets of modifications, return distance score 0-100 (100=totally different).
+    Normalized by real parameter ranges, weighted by detection importance."""
+    # Max possible difference for each numeric parameter
+    ranges = {
+        "noise": 10.0,
+        "zoom": 0.08,
+        "gamma": 0.06,
+        "hue_shift": 20.0,
+        "crop_percent": 2.0,
+        "speed": 0.10,
+        "pitch_semitones": 2.0,
+        "fps": 0.20,
+    }
+    # Weights by detection importance (sum = 100)
+    weights = {
+        "pitch_semitones": 22,
+        "noise": 20,
+        "hflip": 15,
+        "zoom": 15,
+        "gamma": 6,
+        "fps": 6,
+        "speed": 6,
+        "crop_percent": 5,
+        "hue_shift": 5,
+    }
+    # Parameters that are offset from a base value
+    bases = {"zoom": 1.0, "gamma": 1.0, "speed": 1.0, "fps": 30.0}
+
+    score = 0.0
+    for param, max_range in ranges.items():
+        base = bases.get(param, 0.0)
+        val_a = mods_a.get(param, base) - base
+        val_b = mods_b.get(param, base) - base
+        normalized = min(abs(val_a - val_b) / max(max_range, 1e-9), 1.0)
+        score += normalized * weights.get(param, 0)
+
+    # Binary hflip
+    if mods_a.get("hflip", False) != mods_b.get("hflip", False):
+        score += weights["hflip"]
+
+    return round(min(score, 100))
+
+
+def _generate_with_diversity(input_path, output_path, intensity, enabled_mods,
+                             previous_mods_list, min_distance=30, max_retries=3):
+    """Generate a variation ensuring sufficient distance from all previous variations.
+    Retries up to max_retries times if the result is too similar to any previous set."""
+    from uniquifier import uniquify_video_ffmpeg
+
+    best_result = None
+    best_min_dist = -1
+
+    for attempt in range(max_retries + 1):
+        r = uniquify_video_ffmpeg(input_path, output_path, intensity, enabled_mods)
+        if not r.get("success"):
+            return r
+
+        mods = r.get("modifications", {})
+
+        if not previous_mods_list:
+            return r
+
+        min_dist = min(_modifications_distance(mods, prev) for prev in previous_mods_list)
+
+        if min_dist >= min_distance:
+            return r
+
+        # Keep the best attempt so far
+        if min_dist > best_min_dist:
+            best_result = r
+            best_min_dist = min_dist
+
+        # Retry: remove file before regenerating
+        if attempt < max_retries:
+            try:
+                os.remove(output_path)
+            except OSError:
+                pass
+
+    # Return best attempt even if distance is still low
+    return best_result
+
+
 def get_dated_folder_name():
     now = datetime.now()
     m = {1:"janvier",2:"fevrier",3:"mars",4:"avril",5:"mai",6:"juin",
@@ -328,6 +412,26 @@ def run_generation(input_path, num_vars, output_dir, intensity, enabled_mods, pr
             completed += 1
             progress_bar.progress(completed / num_vars)
             status_el.text(f"⏳ {completed}/{num_vars} genere(s)...")
+
+    # Post-parallel diversity check: regenerate variants that are too close
+    all_mods = [(i, r.get("modifications", {})) for i, r in enumerate(raw_results) if r and r.get("success")]
+    to_regenerate = set()
+    for a_idx in range(len(all_mods)):
+        for b_idx in range(a_idx + 1, len(all_mods)):
+            i_a, mods_a = all_mods[a_idx]
+            i_b, mods_b = all_mods[b_idx]
+            if _modifications_distance(mods_a, mods_b) < 30:
+                to_regenerate.add(i_b)
+
+    if to_regenerate:
+        status_el.text(f"🔄 Diversification: {len(to_regenerate)} variante(s)...")
+        kept_mods = [mods for i, mods in all_mods if i not in to_regenerate]
+        for idx in sorted(to_regenerate):
+            out = os.path.join(out_dir, f"V{idx+1:02d}.mp4")
+            r = _generate_with_diversity(input_path, out, intensity, enabled_mods, kept_mods)
+            raw_results[idx] = r
+            if r and r.get("success"):
+                kept_mods.append(r.get("modifications", {}))
 
     # Show errors if any
     if errors and not any(r and r.get("success") for r in raw_results):
@@ -683,7 +787,6 @@ def main():
                     total_steps = len(files) * vpv
                     step = 0
                     try:
-                        from uniquifier import uniquify_video_ffmpeg, FFMPEG_BIN
                         ok, ffpath, info = _check_ffmpeg()
                         if not ok:
                             st.error(f"FFmpeg non disponible ({ffpath}): {info}")
@@ -697,15 +800,17 @@ def main():
                             vfolder = os.path.join(bp, vname)
                             os.makedirs(vfolder, exist_ok=True)
                             vr = {'name': vname, 'variations': [], 'success_count': 0}
+                            previous_mods = []
 
                             for j in range(vpv):
                                 step += 1
                                 stat.text(f"⏳ [{step}/{total_steps}] {vname} — V{j+1:02d}")
                                 prog.progress(step / total_steps)
                                 op = os.path.join(vfolder, f"V{j+1:02d}.mp4")
-                                r = uniquify_video_ffmpeg(tmp.name, op, intensity, enabled_mods)
+                                r = _generate_with_diversity(tmp.name, op, intensity, enabled_mods, previous_mods)
                                 if r["success"]:
                                     mods = r.get("modifications",{})
+                                    previous_mods.append(mods)
                                     a = estimate_uniqueness(mods)
                                     vr['variations'].append({
                                         'name': f"V{j+1:02d}", 'output_path': op,
@@ -857,8 +962,6 @@ def main():
                     all_scores = []
                     start_time = datetime.now()
 
-                    from uniquifier import uniquify_video_ffmpeg
-
                     # Check FFmpeg before starting Farm
                     ok, ffpath, info = _check_ffmpeg()
                     if not ok:
@@ -883,6 +986,7 @@ def main():
                             'variations': [],
                             'success_count': 0
                         }
+                        previous_mods = []
 
                         for j in range(farm_vpv):
                             status_text.markdown(f"""<div style="background:#1C1C1E;border:1px solid #2C2C2E;
@@ -891,10 +995,11 @@ def main():
                             </div>""", unsafe_allow_html=True)
 
                             out = os.path.join(video_folder, f"V{j+1:02d}.mp4")
-                            r = uniquify_video_ffmpeg(vpath, out, intensity, enabled_mods)
+                            r = _generate_with_diversity(vpath, out, intensity, enabled_mods, previous_mods)
 
                             if r["success"]:
                                 mods = r.get("modifications", {})
+                                previous_mods.append(mods)
                                 a = estimate_uniqueness(mods)
                                 video_result['variations'].append({
                                     'name': f"V{j+1:02d}",
