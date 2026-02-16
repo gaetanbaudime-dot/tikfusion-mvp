@@ -179,16 +179,17 @@ def estimate_uniqueness(modifications):
 def _modifications_distance(mods_a, mods_b):
     """Compare 2 sets of modifications, return distance score 0-100 (100=totally different).
     Normalized by real parameter ranges, weighted by detection importance."""
-    # Max possible difference for each numeric parameter
+    # Realistic max difference per param (calibrated on medium intensity)
+    # Using medium ranges ensures threshold=30 is achievable at all intensities
     ranges = {
-        "noise": 10.0,
-        "zoom": 0.08,
+        "noise": 6.0,
+        "zoom": 0.05,
         "gamma": 0.06,
-        "hue_shift": 20.0,
-        "crop_percent": 2.0,
-        "speed": 0.10,
-        "pitch_semitones": 2.0,
-        "fps": 0.20,
+        "hue_shift": 12.0,
+        "crop_percent": 1.5,
+        "speed": 0.06,
+        "pitch_semitones": 1.2,
+        "fps": 0.12,
     }
     # Weights by detection importance (sum = 100)
     weights = {
@@ -221,7 +222,7 @@ def _modifications_distance(mods_a, mods_b):
 
 
 def _generate_with_diversity(input_path, output_path, intensity, enabled_mods,
-                             previous_mods_list, min_distance=30, max_retries=3):
+                             previous_mods_list, min_distance=30, max_retries=5):
     """Generate a variation ensuring sufficient distance from all previous variations.
     Retries up to max_retries times if the result is too similar to any previous set."""
     from uniquifier import uniquify_video_ffmpeg
