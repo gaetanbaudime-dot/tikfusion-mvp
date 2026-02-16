@@ -351,24 +351,8 @@ def run_generation(input_path, num_vars, output_dir, intensity, enabled_mods, pr
             mods = r.get("modifications", {})
             out = r["output_path"]
 
-            # Use real UniquenessChecker for per-platform scores
-            try:
-                report = _uniqueness_checker.check_uniqueness(out, add_to_library=True)
-                a = {
-                    'uniqueness': report.overall_score,
-                    'tiktok_score': report.tiktok.uniqueness_score,
-                    'instagram_score': report.instagram.uniqueness_score,
-                    'youtube_score': report.youtube.uniqueness_score,
-                    'tiktok_issues': report.tiktok.issues,
-                    'instagram_issues': report.instagram.issues,
-                    'youtube_issues': report.youtube.issues,
-                }
-            except Exception:
-                # Fallback to formula-based scoring
-                a = estimate_uniqueness(mods)
-                a['tiktok_score'] = None
-                a['instagram_score'] = None
-                a['youtube_score'] = None
+            # Formula-based scoring (consistent across Single/Bulk/Farm)
+            a = estimate_uniqueness(mods)
 
             a['name'] = Path(out).stem
             a['modifications'] = mods
@@ -560,20 +544,37 @@ def main():
         mod_meta = st.toggle("🏷️ Metadata aleatoires", value=True, key="mod_meta", help="Randomise les metadonnees.")
 
         st.markdown("---")
-        ps = 0; d = []
-        if mod_noise: ps += 14; d.append("📡+14")
-        if mod_zoom: ps += 12; d.append("🔍+12")
-        if mod_gamma: ps += 4; d.append("🌗+4")
-        if mod_hue: ps += 1; d.append("🎨+1")
-        if mod_hflip: ps += 5; d.append("🪞+5")
-        if mod_crop: ps += 2; d.append("✂️+2")
-        if mod_speed: ps += 1; d.append("🔄+1")
-        if mod_pitch: ps += 17; d.append("🎵+17")
-        if mod_fps: ps += 3; d.append("🎞️+3")
-        ps += 3; d.append("🔊+3")
-        if mod_meta: ps += 5; d.append("🏷️+5")
-        ps += 8; d.append("💾+8")
-        ps = min(ps, 100)
+        # Dynamic score preview using the same formula as actual generation
+        from uniquifier import INTENSITY_PRESETS
+        _preset = INTENSITY_PRESETS.get(intensity, INTENSITY_PRESETS["medium"])
+        _typical = {
+            "noise": _preset["noise_strength"] * 0.7 if mod_noise else 0,
+            "zoom": (_preset["zoom_range"][0] + _preset["zoom_range"][1]) / 2 if mod_zoom else 1.0,
+            "gamma": 1.015 if mod_gamma else 1.0,
+            "hue_shift": _preset["color_shift"] // 2 if mod_hue else 0,
+            "hflip": mod_hflip and _preset["hflip_chance"] >= 0.4,
+            "crop_percent": _preset["crop_percent"] * 0.7 if mod_crop else 0,
+            "speed": (_preset["speed_range"][0] + _preset["speed_range"][1]) / 2 if mod_speed else 1.0,
+            "pitch_semitones": _preset["pitch_semitones"] * 0.7 if mod_pitch else 0,
+            "fps": 30 + _preset["fps_shift"] * 0.7 if mod_fps else 30,
+            "metadata_randomized": mod_meta,
+        }
+        _preview = estimate_uniqueness(_typical)
+        ps = _preview['uniqueness']
+        # Build detail breakdown
+        d = []
+        if mod_noise: d.append(f"📡+{min(round(_typical['noise'] * 3), 18)}")
+        if mod_zoom: d.append(f"🔍+{min(round((_typical['zoom'] - 1.0) * 350), 14)}")
+        if mod_gamma: d.append(f"🌗+{min(round(abs(_typical['gamma'] - 1.0) * 200), 5)}")
+        if mod_hue: d.append(f"🎨+{min(round(abs(_typical['hue_shift']) * 0.15), 2)}")
+        if mod_hflip and _typical['hflip']: d.append("🪞+12")
+        if mod_crop: d.append(f"✂️+{min(round(_typical['crop_percent'] * 2), 4)}")
+        if mod_speed: d.append(f"🔄+{min(round(abs(_typical['speed'] - 1.0) * 40), 3)}")
+        if mod_pitch: d.append(f"🎵+{min(round(abs(_typical['pitch_semitones']) * 35), 20)}")
+        if mod_fps: d.append(f"🎞️+{min(round(abs(_typical['fps'] - 30) * 50), 5)}")
+        d.append("🔊+3")
+        if mod_meta: d.append("🏷️+5")
+        d.append("💾+8")
         bc, bl = get_badge(ps)
         st.markdown(f"""<div style="background:#1C1C1E;border:1px solid #2C2C2E;border-radius:12px;padding:14px;margin:8px 0">
             <div style="display:flex;align-items:center;justify-content:space-between">
@@ -795,7 +796,8 @@ def main():
     # ===== FERME (Farm Mode) =====
     with tab_farm:
         st.markdown("### 🏭 Mode Ferme — Traitement en masse")
-        st.markdown('<div style="color:#86868B;font-size:0.82rem;margin-bottom:12px">Upload 50+ videos sources, lance le traitement, reviens le matin. Tout sera pret avec les scores.</div>', unsafe_allow_html=True)
+        st.markdown('<div style="color:#86868B;font-size:0.82rem;margin-bottom:12px">Traitement en masse — upload tes videos et lance la generation. <b>Garde cette page ouverte</b> pendant toute la duree du traitement.</div>', unsafe_allow_html=True)
+        st.warning("⚠️ Ne ferme pas le navigateur pendant le traitement. La generation s'arrete si la connexion est coupee.")
 
         if not st.session_state.get('farm_running') and not st.session_state.get('farm_done'):
             # === UPLOAD + CONFIG ===
@@ -813,14 +815,7 @@ def main():
                 if len(farm_files) > 5:
                     st.caption(f"  ... +{len(farm_files)-5} autres")
 
-                fc1, fc2 = st.columns(2)
-                with fc1:
-                    farm_vpv = st.slider("Variations par video", 1, 20, 5, key="farm_vpv")
-                with fc2:
-                    farm_intensity = st.select_slider(
-                        "Intensite Ferme", options=["low","medium","high"],
-                        value="medium", key="farm_intensity"
-                    )
+                farm_vpv = st.slider("Variations par video", 1, 20, 5, key="farm_vpv")
 
                 total_gen = len(farm_files) * farm_vpv
                 est_seconds = total_gen * 8
@@ -889,8 +884,6 @@ def main():
                             'success_count': 0
                         }
 
-                        fi = st.session_state.get('farm_intensity', 'medium')
-
                         for j in range(farm_vpv):
                             status_text.markdown(f"""<div style="background:#1C1C1E;border:1px solid #2C2C2E;
                                 border-radius:8px;padding:8px 12px;font-size:0.85rem;color:#F5F5F7">
@@ -898,7 +891,7 @@ def main():
                             </div>""", unsafe_allow_html=True)
 
                             out = os.path.join(video_folder, f"V{j+1:02d}.mp4")
-                            r = uniquify_video_ffmpeg(vpath, out, fi, enabled_mods)
+                            r = uniquify_video_ffmpeg(vpath, out, intensity, enabled_mods)
 
                             if r["success"]:
                                 mods = r.get("modifications", {})

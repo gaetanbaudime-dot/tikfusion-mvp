@@ -77,6 +77,22 @@ def _get_video_resolution(input_path):
         pass
     return None, None
 
+
+def _get_audio_sample_rate(input_path):
+    """Get original audio sample rate via ffprobe (default 44100)"""
+    if not FFPROBE_BIN:
+        return 44100
+    try:
+        cmd = [FFPROBE_BIN, "-v", "error", "-select_streams", "a:0",
+               "-show_entries", "stream=sample_rate",
+               "-of", "csv=p=0", input_path]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if r.returncode == 0 and r.stdout.strip():
+            return int(r.stdout.strip())
+    except Exception:
+        pass
+    return 44100
+
 INTENSITY_PRESETS = {
     "low": {
         "speed_range": (0.98, 1.02),       # Très subtil — quasi imperceptible
@@ -228,9 +244,10 @@ def uniquify_video_ffmpeg(input_path, output_path, intensity="medium", enabled_m
         audio_filters.append(f"atempo={speed}")
 
     if mods["pitch"] and pitch_semitones != 0:
+        sample_rate = _get_audio_sample_rate(input_path)
         pitch_factor = 2 ** (pitch_semitones / 12)
-        audio_filters.append(f"asetrate=44100*{pitch_factor:.6f}")
-        audio_filters.append("aresample=44100")
+        audio_filters.append(f"asetrate={sample_rate}*{pitch_factor:.6f}")
+        audio_filters.append(f"aresample={sample_rate}")
 
     audio_volume = random.uniform(0.97, 1.03)
     audio_filters.append(f"volume={audio_volume:.3f}")
