@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Optional
 import subprocess
 
+from uniquifier import FFMPEG_BIN, FFPROBE_BIN
+
 @dataclass
 class PlatformScore:
     platform: str
@@ -50,7 +52,7 @@ class UniquenessChecker:
             # Extract frames
             with tempfile.TemporaryDirectory() as tmpdir:
                 cmd = [
-                    "ffmpeg", "-i", video_path,
+                    FFMPEG_BIN, "-i", video_path,
                     "-vf", "fps=1,scale=64:64",
                     "-frames:v", "8",
                     f"{tmpdir}/frame_%02d.jpg"
@@ -80,8 +82,10 @@ class UniquenessChecker:
     
     def _get_video_info(self, video_path):
         """Get video metadata"""
+        if not FFPROBE_BIN:
+            return {}
         cmd = [
-            "ffprobe", "-v", "quiet", "-print_format", "json",
+            FFPROBE_BIN, "-v", "quiet", "-print_format", "json",
             "-show_format", "-show_streams", video_path
         ]
         try:

@@ -5,11 +5,15 @@ import subprocess
 import tempfile
 import os
 
+from uniquifier import FFMPEG_BIN, FFPROBE_BIN
+
 
 def get_duration(video_path):
     """Duree de la video en secondes"""
+    if not FFPROBE_BIN:
+        return 30
     try:
-        cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+        cmd = [FFPROBE_BIN, "-v", "error", "-show_entries", "format=duration",
                "-of", "default=noprint_wrappers=1:nokey=1", video_path]
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         return float(r.stdout.strip())
@@ -32,7 +36,7 @@ def extract_text_from_video(video_path, num_frames=8):
     with tempfile.TemporaryDirectory() as tmpdir:
         # Extraire des frames a intervalles reguliers
         cmd = [
-            "ffmpeg", "-i", video_path,
+            FFMPEG_BIN, "-i", video_path,
             "-vf", f"fps=1/{interval},scale=1080:-1",
             "-frames:v", str(num_frames),
             "-q:v", "2",

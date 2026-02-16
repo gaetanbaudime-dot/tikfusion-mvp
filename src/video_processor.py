@@ -5,6 +5,8 @@ import subprocess
 import os
 from pathlib import Path
 
+from uniquifier import FFMPEG_BIN, FFPROBE_BIN
+
 PLATFORM_SPECS = {
     "tiktok": {"width": 1080, "height": 1920, "max_duration": 180},
     "instagram_reels": {"width": 1080, "height": 1920, "max_duration": 90},
@@ -21,7 +23,7 @@ class VideoProcessor:
         w, h = spec["width"], spec["height"]
         
         cmd = [
-            "ffmpeg", "-y", "-i", input_path,
+            FFMPEG_BIN, "-y", "-i", input_path,
             "-vf", f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2",
             "-c:v", "libx264", "-crf", "20", "-preset", "fast",
             "-c:a", "aac", "-b:a", "128k",
@@ -38,7 +40,7 @@ class VideoProcessor:
     def smart_crop(self, input_path, output_path, target_ratio="9:16"):
         """Crop intelligent pour format vertical"""
         cmd = [
-            "ffmpeg", "-y", "-i", input_path,
+            FFMPEG_BIN, "-y", "-i", input_path,
             "-vf", "crop=ih*9/16:ih",
             "-c:v", "libx264", "-crf", "20",
             "-c:a", "copy",
@@ -57,8 +59,10 @@ class VideoProcessor:
         base_name = Path(input_path).stem
         
         # Get duration
+        if not FFPROBE_BIN:
+            return []
         probe_cmd = [
-            "ffprobe", "-v", "error", "-show_entries", "format=duration",
+            FFPROBE_BIN, "-v", "error", "-show_entries", "format=duration",
             "-of", "default=noprint_wrappers=1:nokey=1", input_path
         ]
         
@@ -76,7 +80,7 @@ class VideoProcessor:
             output_path = os.path.join(output_dir, f"{base_name}_clip{clip_num:02d}.mp4")
             
             cmd = [
-                "ffmpeg", "-y", "-i", input_path,
+                FFMPEG_BIN, "-y", "-i", input_path,
                 "-ss", str(start), "-t", str(clip_duration),
                 "-c:v", "libx264", "-crf", "20",
                 "-c:a", "aac",

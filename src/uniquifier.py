@@ -21,19 +21,19 @@ except:
 
 
 def _find_ffmpeg():
-    """Find ffmpeg binary — system PATH, imageio-ffmpeg, or common locations"""
-    # 1. System PATH
-    p = shutil.which("ffmpeg")
-    if p:
-        return p
-    # 2. imageio-ffmpeg bundled binary
+    """Find ffmpeg binary — imageio-ffmpeg (bundled), system PATH, or common locations"""
+    # 1. imageio-ffmpeg bundled binary (most reliable on Streamlit Cloud)
     try:
         import imageio_ffmpeg
         p = imageio_ffmpeg.get_ffmpeg_exe()
         if p and os.path.exists(p):
             return p
-    except ImportError:
+    except Exception:
         pass
+    # 2. System PATH
+    p = shutil.which("ffmpeg")
+    if p:
+        return p
     # 3. Common system locations
     for candidate in ["/usr/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/opt/homebrew/bin/ffmpeg"]:
         if os.path.exists(candidate):
@@ -41,7 +41,24 @@ def _find_ffmpeg():
     return "ffmpeg"  # last resort — let it fail with a clear error
 
 
+def _find_ffprobe():
+    """Find ffprobe binary — system PATH or common locations"""
+    p = shutil.which("ffprobe")
+    if p:
+        return p
+    for candidate in ["/usr/bin/ffprobe", "/usr/local/bin/ffprobe", "/opt/homebrew/bin/ffprobe"]:
+        if os.path.exists(candidate):
+            return candidate
+    # ffprobe not bundled by imageio-ffmpeg — derive from ffmpeg path
+    ffmpeg_dir = os.path.dirname(FFMPEG_BIN)
+    probe_candidate = os.path.join(ffmpeg_dir, "ffprobe")
+    if os.path.exists(probe_candidate):
+        return probe_candidate
+    return None  # ffprobe not available
+
+
 FFMPEG_BIN = _find_ffmpeg()
+FFPROBE_BIN = _find_ffprobe()
 
 INTENSITY_PRESETS = {
     "low": {

@@ -220,9 +220,24 @@ def _get_ffmpeg():
         try:
             from uniquifier import FFMPEG_BIN
             _get_ffmpeg._path = FFMPEG_BIN
-        except ImportError:
+        except Exception:
             _get_ffmpeg._path = shutil.which("ffmpeg") or "ffmpeg"
     return _get_ffmpeg._path
+
+
+def _check_ffmpeg():
+    """Check FFmpeg is available and return (ok, path, version_or_error)"""
+    ffmpeg = _get_ffmpeg()
+    try:
+        r = subprocess.run([ffmpeg, "-version"], capture_output=True, text=True, timeout=10)
+        if r.returncode == 0:
+            version_line = r.stdout.split('\n')[0] if r.stdout else "OK"
+            return True, ffmpeg, version_line
+        return False, ffmpeg, r.stderr[:200] if r.stderr else "returncode != 0"
+    except FileNotFoundError:
+        return False, ffmpeg, f"Binaire introuvable: {ffmpeg}"
+    except Exception as e:
+        return False, ffmpeg, str(e)
 
 
 def extract_thumbnail(video_path):
@@ -280,10 +295,10 @@ def run_generation(input_path, num_vars, output_dir, intensity, enabled_mods, pr
     from uniquifier import uniquify_video_ffmpeg, FFMPEG_BIN
 
     # Check FFmpeg is available
-    try:
-        subprocess.run([FFMPEG_BIN, "-version"], capture_output=True, timeout=5)
-    except Exception:
-        st.error(f"FFmpeg non trouve (cherche: {FFMPEG_BIN}). Installe imageio-ffmpeg.")
+    ok, ffpath, info = _check_ffmpeg()
+    if not ok:
+        st.error(f"FFmpeg non disponible ({ffpath}): {info}")
+        st.info("Installe `imageio-ffmpeg` (pip) ou `ffmpeg` (systeme).")
         return [], "error"
 
     folder = get_dated_folder_name()
@@ -298,6 +313,7 @@ def run_generation(input_path, num_vars, output_dir, intensity, enabled_mods, pr
 
     # Parallel generation (3 workers)
     raw_results = [None] * num_vars
+    errors = []
     completed = 0
 
     def _worker(args):
@@ -310,9 +326,17 @@ def run_generation(input_path, num_vars, output_dir, intensity, enabled_mods, pr
         for future in as_completed(futures):
             idx, r = future.result()
             raw_results[idx] = r
+            if not r.get("success"):
+                errors.append(f"V{idx+1:02d}: {r.get('error', 'unknown')[:150]}")
             completed += 1
             progress_bar.progress(completed / num_vars)
             status_el.text(f"⏳ {completed}/{num_vars} genere(s)...")
+
+    # Show errors if any
+    if errors and not any(r and r.get("success") for r in raw_results):
+        st.error("Toutes les variations ont echoue. Erreur FFmpeg:")
+        st.code(errors[0], language="text")
+        return [], "error"
 
     # Process results + real uniqueness check + SQLite persist
     session_id = save_session(
@@ -492,6 +516,17 @@ def main():
     with tab_config:
         st.markdown("### ⚙️ Configuration")
 
+        # FFmpeg diagnostic
+        ok, ffpath, info = _check_ffmpeg()
+        if ok:
+            st.markdown(f"""<div style="background:#0A2F1C;border:1px solid #30D158;border-radius:8px;padding:8px 12px;font-size:0.78rem;color:#30D158;margin-bottom:12px">
+                ✅ FFmpeg OK — <code>{ffpath}</code><br><span style="font-size:0.7rem;color:#86868B">{info[:80]}</span>
+            </div>""", unsafe_allow_html=True)
+        else:
+            st.markdown(f"""<div style="background:#2D1215;border:1px solid #FF453A;border-radius:8px;padding:8px 12px;font-size:0.78rem;color:#FF453A;margin-bottom:12px">
+                ❌ FFmpeg non disponible — <code>{ffpath}</code><br><span style="font-size:0.7rem">{info[:120]}</span>
+            </div>""", unsafe_allow_html=True)
+
         c1, c2 = st.columns(2)
         with c1: output_dir = st.text_input("📁 Dossier de sortie", value="outputs", key="cfg_output")
         with c2: intensity = st.select_slider("🎚️ Intensite", options=["low","medium","high"], value="medium", key="cfg_intensity")
@@ -633,8 +668,8 @@ def main():
                             st.session_state['single_analyses'] = analyses
                             st.session_state['single_folder'] = folder
                             st.success(f"✅ {len(analyses)} variations generees")
-                        else:
-                            st.error("❌ Generation echouee — verifie que ffmpeg est installe")
+                        elif folder != "error":
+                            st.error("❌ Toutes les variations ont echoue. Verifie l'onglet Config pour le diagnostic FFmpeg.")
                     except Exception as e:
                         stat.empty(); prog.empty()
                         st.error(f"❌ Erreur: {e}")
@@ -679,7 +714,11 @@ def main():
                     all_res = []
                     try:
                         from uniquifier import uniquify_video_ffmpeg, FFMPEG_BIN
-                        subprocess.run([FFMPEG_BIN, "-version"], capture_output=True, timeout=5)
+                        ok, ffpath, info = _check_ffmpeg()
+                        if not ok:
+                            st.error(f"FFmpeg non disponible ({ffpath}): {info}")
+                            st.info("Installe `imageio-ffmpeg` (pip) ou `ffmpeg` (systeme).")
+                            raise RuntimeError("FFmpeg unavailable")
                         for vi, uf in enumerate(files):
                             vname = Path(uf.name).stem
                             stat.text(f"⏳ [{vi+1}/{len(files)}] {vname}")
@@ -854,6 +893,14 @@ def main():
                     start_time = datetime.now()
 
                     from uniquifier import uniquify_video_ffmpeg
+
+                    # Check FFmpeg before starting Farm
+                    ok, ffpath, info = _check_ffmpeg()
+                    if not ok:
+                        st.error(f"FFmpeg non disponible ({ffpath}): {info}")
+                        st.info("Installe `imageio-ffmpeg` (pip) ou `ffmpeg` (systeme).")
+                        st.session_state['farm_running'] = False
+                        st.rerun()
 
                     farm_folder = get_dated_folder_name() + " FERME"
                     farm_path = os.path.join(output_dir, farm_folder)
