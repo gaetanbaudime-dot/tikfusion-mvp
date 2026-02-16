@@ -479,7 +479,7 @@ def render_results(analyses, folder, prefix):
     # Video preview gallery — 2 per row with individual download buttons
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
     st.markdown("##### 🎬 Aperçus — verifier les modifications")
-    preview_per_row = 2
+    preview_per_row = 4
     for start in range(0, len(analyses), preview_per_row):
         chunk = analyses[start:start+preview_per_row]
         pcols = st.columns(preview_per_row)
@@ -585,47 +585,17 @@ def main():
 
         # ===== INFO INSTAGRAM =====
         st.markdown("---")
-        st.markdown("### 🛡️ Detection Instagram — Notre reference")
+        st.markdown("### 🔍 Comment fonctionne la detection Instagram")
         st.markdown("""<div class="info-card">
-            <h4>Pourquoi Instagram est notre reference</h4>
-            <p>Instagram utilise l'algorithme de detection de doublons <span class="highlight">le plus strict</span>
-            parmi toutes les plateformes. Si votre video passe Instagram, elle passera partout (TikTok, YouTube, etc.).</p>
-
-            <div style="margin-top:12px">
-                <div style="color:#E1306C;font-weight:600;font-size:0.85rem;margin-bottom:8px">
-                    5 couches de detection Instagram :
-                </div>
-                <div class="step">
-                    1. <span class="highlight">Perceptual Hashing (pHash)</span> — Compare une empreinte visuelle de chaque frame.
-                    Instagram detecte un doublon si la difference pHash est <b>&lt;8%</b>.
-                    TikFusion applique <span style="color:#FF6482">14-18% de noise</span> + <span style="color:#FFD60A">zoom</span>
-                    — soit <b>3x au-dessus</b> du seuil de detection.<br>
-                    2. <span class="highlight">Content Matching (Deep Learning)</span> — Reseau de neurones qui reconnait le contenu.
-                    Le <span style="color:#FF453A">miroir</span> inverse les features spatiales,
-                    le <span style="color:#30D158">crop</span> change le cadrage — le modele ne reconnait plus la video.<br>
-                    3. <span class="highlight">Audio Fingerprinting</span> — Empreinte audio Chromaprint/Dejavu.
-                    Le <span style="color:#5E5CE6">pitch shift</span> (0.4-1.0 demi-ton) et le changement de
-                    <span style="color:#64D2FF">vitesse</span> cassent l'empreinte sans etre audibles.<br>
-                    4. <span class="highlight">Watermark Detection</span> — Detecte les watermarks TikTok/autres.
-                    Le crop + re-encoding les suppriment completement.<br>
-                    5. <span class="highlight">Metadata Analysis</span> — Compare les metadonnees EXIF/MP4.
-                    La <span style="color:#BF5AF2">randomisation meta</span> genere un profil unique a chaque variation.
-                </div>
+            <h4>🔍 Comment fonctionne la detection Instagram</h4>
+            <p>Instagram utilise <span class="highlight">3 couches de detection</span> pour reperer les videos dupliquees :</p>
+            <div class="step">
+                <b>1. Perceptual Hashing (~35%)</b> — Compare l'empreinte visuelle de chaque frame. Le miroir, le zoom, le bruit pixel et le crop cassent ce hash.<br>
+                <b>2. Deep Learning (~30%)</b> — Un modele IA analyse le contenu semantique. Le changement de vitesse, le crop et la combinaison de mods le trompent.<br>
+                <b>3. Audio Fingerprinting (~25%)</b> — Compare l'empreinte audio. Le pitch shift et le changement de FPS suffisent a passer.<br>
+                <b>4. Metadata Check (~10%)</b> — Verifie les metadonnees du fichier. La randomisation des metadata regle ca.
             </div>
-
-            <div style="margin-top:12px;padding:12px;background:#0A2F1C;border:1px solid #30D158;
-                        border-radius:8px;color:#30D158;font-size:0.78rem">
-                ✅ <b>Score ≥60% = Safe Instagram</b> (badge vert) — Votre video depasse largement les seuils de detection
-                d'Instagram (la plateforme la plus stricte). Elle passera sur <b>toutes</b> les plateformes : TikTok, YouTube, Reels.
-                <br><span style="font-size:0.72rem;color:#86868B;margin-top:4px;display:block">
-                TikFusion applique des modifications <b>3x superieures</b> aux seuils de detection (pHash: 14-18% vs 8% requis,
-                pitch: 0.4-1.0st vs 0.2st requis, noise+zoom: combinaison qui casse 100% des algorithmes de matching).</span>
-            </div>
-            <div style="margin-top:6px;padding:10px;background:#2C2C2E;border:1px solid #3A3A3C;
-                        border-radius:8px;color:#FF9F0A;font-size:0.78rem">
-                ⚠️ <b>Score 30-59% = Safe TikTok</b> (badge orange) — Passe TikTok et YouTube mais risque la detection
-                sur Instagram Reels. Activez plus de modifications pour cibler Instagram.
-            </div>
+            <p style="margin-top:10px"><span class="highlight">Score >= 60% = Safe Instagram.</span> Toutes les modifications sont appliquees automatiquement par TikFusion.</p>
         </div>""", unsafe_allow_html=True)
 
     # Config values
@@ -636,7 +606,7 @@ def main():
 
     # ===== SINGLE =====
     with tab_single:
-        col_l, col_r = st.columns([1, 3])
+        col_l, col_r = st.columns([1, 4])
 
         with col_l:
             uploaded = st.file_uploader("📹 Video source", type=['mp4','mov','avi'], key="single_file")
@@ -690,7 +660,7 @@ def main():
 
     # ===== BULK =====
     with tab_bulk:
-        col_l, col_r = st.columns([1, 3])
+        col_l, col_r = st.columns([1, 4])
 
         with col_l:
             files = st.file_uploader("📹 Plusieurs videos", type=['mp4','mov','avi'],
@@ -809,11 +779,11 @@ def main():
                                             use_container_width=True)
 
                         # Video previews
-                        pcols = st.columns(min(3, max(1, len(r['variations']))))
+                        pcols = st.columns(min(4, max(1, len(r['variations']))))
                         for i, v in enumerate(r['variations']):
                             p = v.get('output_path','')
                             if p and os.path.exists(p):
-                                with pcols[i % 3]:
+                                with pcols[i % 4]:
                                     st.video(p)
                                     u = v['uniqueness']
                                     bc, _ = get_badge(u)
@@ -1034,11 +1004,11 @@ def main():
 
                         # Video previews
                         if r['variations']:
-                            pcols = st.columns(min(3, len(r['variations'])))
+                            pcols = st.columns(min(4, len(r['variations'])))
                             for i, v in enumerate(r['variations']):
                                 p = v.get('output_path','')
                                 if p and os.path.exists(p):
-                                    with pcols[i % 3]:
+                                    with pcols[i % 4]:
                                         st.video(p)
                                         u = v['uniqueness']
                                         bc, _ = get_badge(u)
@@ -1054,22 +1024,7 @@ def main():
 
     # ===== STATS =====
     with tab_stats:
-        st.markdown("### 📊 Stats & Algorithme Instagram")
-
-        # ---- Comment Instagram detecte les doublons ----
-        st.markdown("""<div class="info-card">
-            <h4>🔍 Comment fonctionne la detection Instagram</h4>
-            <p>Instagram utilise <span class="highlight">3 couches de detection</span> pour reperer les videos dupliquees :</p>
-            <div class="step">
-                <b>1. Perceptual Hashing (~35%)</b> — Compare l'empreinte visuelle de chaque frame. Le miroir, le zoom, le bruit pixel et le crop cassent ce hash.<br>
-                <b>2. Deep Learning (~30%)</b> — Un modele IA analyse le contenu semantique. Le changement de vitesse, le crop et la combinaison de mods le trompent.<br>
-                <b>3. Audio Fingerprinting (~25%)</b> — Compare l'empreinte audio. Le pitch shift et le changement de FPS suffisent a passer.<br>
-                <b>4. Metadata Check (~10%)</b> — Verifie les metadonnees du fichier. La randomisation des metadata regle ca.
-            </div>
-            <p style="margin-top:10px"><span class="highlight">Score >= 60% = Safe Instagram.</span> Toutes les modifications sont appliquees automatiquement par TikFusion.</p>
-        </div>""", unsafe_allow_html=True)
-
-        st.markdown("---")
+        st.markdown("### 📊 Statistiques")
 
         # ---- Disk stats (always available) ----
         if os.path.exists(output_dir):

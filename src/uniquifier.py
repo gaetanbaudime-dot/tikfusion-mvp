@@ -60,6 +60,23 @@ def _find_ffprobe():
 FFMPEG_BIN = _find_ffmpeg()
 FFPROBE_BIN = _find_ffprobe()
 
+
+def _get_video_resolution(input_path):
+    """Get original video width and height via ffprobe"""
+    if not FFPROBE_BIN:
+        return None, None
+    try:
+        cmd = [FFPROBE_BIN, "-v", "error", "-select_streams", "v:0",
+               "-show_entries", "stream=width,height",
+               "-of", "csv=p=0:s=x", input_path]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if r.returncode == 0 and 'x' in r.stdout:
+            w, h = r.stdout.strip().split('x')[:2]
+            return int(w), int(h)
+    except Exception:
+        pass
+    return None, None
+
 INTENSITY_PRESETS = {
     "low": {
         "speed_range": (0.98, 1.02),       # Très subtil — quasi imperceptible
@@ -186,9 +203,17 @@ def uniquify_video_ffmpeg(input_path, output_path, intensity="medium", enabled_m
         filters.append(f"scale=iw*{zoom}:ih*{zoom}:flags=fast_bilinear")
         filters.append("crop=iw/{0}:ih/{0}".format(zoom))
 
-    # Scale to output resolution — keep original if already 9:16
-    filters.append("scale=1080:1920:force_original_aspect_ratio=decrease:flags=fast_bilinear")
-    filters.append("pad=1080:1920:(ow-iw)/2:(oh-ih)/2")
+    # Restore original resolution after crop/zoom (preserves input quality)
+    orig_w, orig_h = _get_video_resolution(input_path)
+    if orig_w and orig_h:
+        # Ensure even dimensions (required by h264)
+        w = orig_w - (orig_w % 2)
+        h = orig_h - (orig_h % 2)
+        filters.append(f"scale={w}:{h}:flags=fast_bilinear")
+    else:
+        # Fallback: standard vertical format
+        filters.append("scale=1080:1920:force_original_aspect_ratio=decrease:flags=fast_bilinear")
+        filters.append("pad=1080:1920:(ow-iw)/2:(oh-ih)/2")
 
     # FPS
     if mods["fps"] and target_fps != 30.0:
@@ -213,7 +238,7 @@ def uniquify_video_ffmpeg(input_path, output_path, intensity="medium", enabled_m
     audio_filter = ",".join(audio_filters)
 
     # === ENCODING ===
-    crf = random.randint(18, 24)
+    crf = random.randint(17, 20)
     gop_size = random.choice([24, 30, 48, 60, 72])
     bf_count = random.choice([0, 1, 2, 3])
 
@@ -253,10 +278,8 @@ def uniquify_video_ffmpeg(input_path, output_path, intensity="medium", enabled_m
 
     cmd.extend([
         "-c:v", "libx264", "-crf", str(crf), "-preset", "ultrafast",
-        "-tune", "fastdecode",
-        "-x264opts", "no-deblock",
         "-g", str(gop_size), "-bf", str(bf_count),
-        "-c:a", "aac", "-b:a", "96k",
+        "-c:a", "aac", "-b:a", "128k",
         "-movflags", "+faststart",
         "-sn", "-dn",
         "-threads", "0",
