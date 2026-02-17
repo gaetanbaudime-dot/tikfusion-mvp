@@ -12,12 +12,6 @@ import shutil
 from pathlib import Path
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import locale
-
-try:
-    locale.setlocale(locale.LC_TIME, 'fr_FR.UTF-8')
-except:
-    pass
 
 
 def _find_ffmpeg():

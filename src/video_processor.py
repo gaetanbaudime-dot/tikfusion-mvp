@@ -50,7 +50,7 @@ class VideoProcessor:
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
             return result.returncode == 0
-        except:
+        except Exception:
             return False
     
     def split_into_clips(self, input_path, output_dir, clip_duration=30):
@@ -69,7 +69,7 @@ class VideoProcessor:
         try:
             result = subprocess.run(probe_cmd, capture_output=True, text=True)
             duration = float(result.stdout.strip())
-        except:
+        except Exception:
             return []
         
         clips = []

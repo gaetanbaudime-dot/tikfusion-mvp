@@ -16,6 +16,7 @@ import io
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import gc
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
@@ -225,26 +226,135 @@ def _generate_with_diversity(input_path, output_path, intensity, enabled_mods,
                              previous_mods_list, min_distance=30, max_retries=5):
     """Generate a variation ensuring sufficient distance from all previous variations.
     Retries up to max_retries times if the result is too similar to any previous set.
-    Always returns the last attempt so metadata matches the file on disk."""
+    Adaptive: more retries when more previous variants exist (harder to be different).
+    Returns the best attempt (fewest fails, then highest min-dist); file on disk matches."""
     from uniquifier import uniquify_video_ffmpeg
 
-    for attempt in range(max_retries + 1):
+    if not previous_mods_list:
+        return uniquify_video_ffmpeg(input_path, output_path, intensity, enabled_mods)
+
+    # Adaptive retries: scales with constraint count (more previous = harder to differ)
+    effective_retries = max_retries + min(len(previous_mods_list), 10)
+
+    best_r = None
+    best_fails = len(previous_mods_list) + 1  # worse than any real result
+    best_min_dist = -1
+    best_backup = None
+
+    for attempt in range(effective_retries + 1):
         r = uniquify_video_ffmpeg(input_path, output_path, intensity, enabled_mods)
         if not r.get("success"):
+            if best_backup:
+                try: os.remove(best_backup)
+                except OSError: pass
             return r
 
         mods = r.get("modifications", {})
+        dists = [_modifications_distance(mods, prev) for prev in previous_mods_list]
+        fails = sum(1 for d in dists if d < min_distance)
+        min_dist = min(dists)
 
-        if not previous_mods_list:
+        if fails == 0:
+            # Perfect — clean up any saved backup
+            if best_backup:
+                try: os.remove(best_backup)
+                except OSError: pass
             return r
 
-        min_dist = min(_modifications_distance(mods, prev) for prev in previous_mods_list)
+        # Better = fewer fails, then higher min_dist as tiebreaker
+        if fails < best_fails or (fails == best_fails and min_dist > best_min_dist):
+            if best_backup:
+                try: os.remove(best_backup)
+                except OSError: pass
+            best_backup = output_path + f".best{attempt}"
+            try:
+                shutil.copy2(output_path, best_backup)
+            except OSError:
+                best_backup = None
+            best_fails = fails
+            best_min_dist = min_dist
+            best_r = r
 
-        if min_dist >= min_distance:
-            return r
+    # No perfect attempt — restore the best one
+    if best_backup and best_r:
+        try:
+            shutil.move(best_backup, output_path)
+        except OSError:
+            # Move failed — clean up orphaned backup
+            try: os.remove(best_backup)
+            except OSError: pass
+        return best_r
 
-    # Return last attempt (matches file on disk) even if distance is still low
+    # Fallback: return last attempt (already on disk)
+    if best_backup:
+        try: os.remove(best_backup)
+        except OSError: pass
     return r
+
+
+def _post_diversify_variations(input_path, variations, intensity, enabled_mods,
+                                max_iterations=10, min_distance=30):
+    """Pairwise post-check: regenerate the worst-offending variant one at a time.
+    Each variation dict must have 'output_path' and 'modifications' keys.
+    Updates 'modifications' and 'uniqueness' in-place on successful regeneration."""
+    already_tried = set()  # indices we already regenerated — avoid infinite loops
+
+    for _iteration in range(max_iterations):
+        # Count failing pairs per variant index
+        fail_count = {}
+        for i in range(len(variations)):
+            for j in range(i + 1, len(variations)):
+                if _modifications_distance(variations[i]['modifications'],
+                                           variations[j]['modifications']) < min_distance:
+                    fail_count[i] = fail_count.get(i, 0) + 1
+                    fail_count[j] = fail_count.get(j, 0) + 1
+
+        if not fail_count:
+            break
+
+        # Pick the variant with the most failing pairs (that we haven't tried yet)
+        candidates = [(cnt, idx) for idx, cnt in fail_count.items() if idx not in already_tried]
+        if not candidates:
+            break
+        candidates.sort(reverse=True)
+        worst_idx = candidates[0][1]
+        already_tried.add(worst_idx)
+
+        # Regenerate against ALL other current mods
+        other_mods = [v['modifications'] for i, v in enumerate(variations) if i != worst_idx]
+        v = variations[worst_idx]
+        out = v['output_path']
+        backup = out + ".bak"
+        try:
+            shutil.copy2(out, backup)
+        except OSError:
+            backup = None
+
+        old_fail = fail_count[worst_idx]
+        r = _generate_with_diversity(input_path, out, intensity, enabled_mods,
+                                     other_mods, max_retries=15)
+        if r and r.get("success"):
+            new_mods = r.get("modifications", {})
+            new_fails = sum(1 for om in other_mods
+                            if _modifications_distance(new_mods, om) < min_distance)
+            if new_fails <= old_fail:
+                # Accept if same or better (lateral moves help escape local minima)
+                v['modifications'] = new_mods
+                v['uniqueness'] = estimate_uniqueness(new_mods)['uniqueness']
+                if new_fails < old_fail:
+                    already_tried.discard(worst_idx)  # strict improvement → allow re-try
+                if backup:
+                    try: os.remove(backup)
+                    except OSError: pass
+            else:
+                # Got worse — restore backup
+                if backup:
+                    try: shutil.move(backup, out)
+                    except OSError: pass
+        else:
+            if backup:
+                try: shutil.move(backup, out)
+                except OSError: pass
 
 
 def get_dated_folder_name():
@@ -294,18 +404,21 @@ def _get_ffmpeg():
 
 
 def _check_ffmpeg():
-    """Check FFmpeg is available and return (ok, path, version_or_error)"""
-    ffmpeg = _get_ffmpeg()
-    try:
-        r = subprocess.run([ffmpeg, "-version"], capture_output=True, text=True, timeout=10)
-        if r.returncode == 0:
-            version_line = r.stdout.split('\n')[0] if r.stdout else "OK"
-            return True, ffmpeg, version_line
-        return False, ffmpeg, r.stderr[:200] if r.stderr else "returncode != 0"
-    except FileNotFoundError:
-        return False, ffmpeg, f"Binaire introuvable: {ffmpeg}"
-    except Exception as e:
-        return False, ffmpeg, str(e)
+    """Check FFmpeg is available and return (ok, path, version_or_error). Cached after first call."""
+    if not hasattr(_check_ffmpeg, '_result'):
+        ffmpeg = _get_ffmpeg()
+        try:
+            r = subprocess.run([ffmpeg, "-version"], capture_output=True, text=True, timeout=10)
+            if r.returncode == 0:
+                version_line = r.stdout.split('\n')[0] if r.stdout else "OK"
+                _check_ffmpeg._result = (True, ffmpeg, version_line)
+            else:
+                _check_ffmpeg._result = (False, ffmpeg, r.stderr[:200] if r.stderr else "returncode != 0")
+        except FileNotFoundError:
+            _check_ffmpeg._result = (False, ffmpeg, f"Binaire introuvable: {ffmpeg}")
+        except Exception as e:
+            _check_ffmpeg._result = (False, ffmpeg, str(e))
+    return _check_ffmpeg._result
 
 
 def extract_thumbnail(video_path):
@@ -326,6 +439,24 @@ def thumb_b64(path):
         with open(thumb, 'rb') as f:
             return base64.b64encode(f.read()).decode()
     return None
+
+
+@st.cache_data(ttl=300, max_entries=50)
+def _read_file_cached(path, _mtime):
+    """Read file bytes with caching — avoids reloading on every Streamlit rerun"""
+    with open(path, 'rb') as f:
+        return f.read()
+
+
+def read_file_safe(path):
+    """Read file bytes safely with cache. Returns None if file missing."""
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        mtime = os.path.getmtime(path)
+        return _read_file_cached(path, mtime)
+    except Exception:
+        return None
 
 
 def build_zip_from_analyses(analyses):
@@ -400,39 +531,61 @@ def run_generation(input_path, num_vars, output_dir, intensity, enabled_mods, pr
             progress_bar.progress(completed / num_vars)
             status_el.text(f"⏳ {completed}/{num_vars} genere(s)...")
 
-    # Post-parallel diversity check: regenerate variants that are too close
-    all_mods = [(i, r.get("modifications", {})) for i, r in enumerate(raw_results) if r and r.get("success")]
-    to_regenerate = set()
-    for a_idx in range(len(all_mods)):
-        for b_idx in range(a_idx + 1, len(all_mods)):
-            i_a, mods_a = all_mods[a_idx]
-            i_b, mods_b = all_mods[b_idx]
-            if _modifications_distance(mods_a, mods_b) < 30:
-                to_regenerate.add(i_b)
+    # Post-parallel diversity check: regenerate worst-offending variant one at a time
+    already_tried = set()
+    for _iter in range(10):
+        success_indices = [i for i, r in enumerate(raw_results) if r and r.get("success")]
+        fail_count = {}
+        for ai in range(len(success_indices)):
+            for bi in range(ai + 1, len(success_indices)):
+                ia, ib = success_indices[ai], success_indices[bi]
+                if _modifications_distance(raw_results[ia].get("modifications", {}),
+                                           raw_results[ib].get("modifications", {})) < 30:
+                    fail_count[ia] = fail_count.get(ia, 0) + 1
+                    fail_count[ib] = fail_count.get(ib, 0) + 1
 
-    if to_regenerate:
-        status_el.text(f"🔄 Diversification: {len(to_regenerate)} variante(s)...")
-        kept_mods = [mods for i, mods in all_mods if i not in to_regenerate]
-        for idx in sorted(to_regenerate):
-            out = os.path.join(out_dir, f"V{idx+1:02d}.mp4")
-            # Backup original before overwriting
-            backup = out + ".bak"
-            try:
-                shutil.copy2(out, backup)
-            except OSError:
-                backup = None
-            r = _generate_with_diversity(input_path, out, intensity, enabled_mods, kept_mods)
-            if r and r.get("success"):
-                raw_results[idx] = r
-                kept_mods.append(r.get("modifications", {}))
+        if not fail_count:
+            break
+
+        candidates = [(cnt, idx) for idx, cnt in fail_count.items() if idx not in already_tried]
+        if not candidates:
+            break
+        candidates.sort(reverse=True)
+        worst_idx = candidates[0][1]
+        already_tried.add(worst_idx)
+
+        status_el.text(f"🔄 Diversification: V{worst_idx+1:02d} ({fail_count[worst_idx]} conflits)...")
+        other_mods = [raw_results[i].get("modifications", {}) for i in success_indices if i != worst_idx]
+        out = os.path.join(out_dir, f"V{worst_idx+1:02d}.mp4")
+        backup = out + ".bak"
+        try:
+            shutil.copy2(out, backup)
+        except OSError:
+            backup = None
+
+        old_fail = fail_count[worst_idx]
+        r = _generate_with_diversity(input_path, out, intensity, enabled_mods,
+                                     other_mods, max_retries=15)
+        if r and r.get("success"):
+            new_mods = r.get("modifications", {})
+            new_fails = sum(1 for om in other_mods
+                            if _modifications_distance(new_mods, om) < 30)
+            if new_fails <= old_fail:
+                # Accept same or better (lateral moves help escape local minima)
+                raw_results[worst_idx] = r
+                if new_fails < old_fail:
+                    already_tried.discard(worst_idx)
                 if backup:
                     try: os.remove(backup)
                     except OSError: pass
             else:
-                # Restore original on failure
                 if backup:
                     try: shutil.move(backup, out)
                     except OSError: pass
+        else:
+            if backup:
+                try: shutil.move(backup, out)
+                except OSError: pass
 
     # Show errors if any
     if errors and not any(r and r.get("success") for r in raw_results):
@@ -449,9 +602,11 @@ def run_generation(input_path, num_vars, output_dir, intensity, enabled_mods, pr
 
     results = []
     for i, r in enumerate(raw_results):
-        if r and r["success"]:
+        if r and r.get("success"):
             mods = r.get("modifications", {})
-            out = r["output_path"]
+            out = r.get("output_path", "")
+            if not out or not os.path.exists(out):
+                continue
 
             # Formula-based scoring (consistent across Single/Bulk/Farm)
             a = estimate_uniqueness(mods)
@@ -473,6 +628,7 @@ def run_generation(input_path, num_vars, output_dir, intensity, enabled_mods, pr
 
             results.append(a)
 
+    gc.collect()
     return results, folder
 
 
@@ -557,8 +713,9 @@ def render_results(analyses, folder, prefix):
             p = a.get('output_path','')
             if p and os.path.exists(p):
                 with cols[i]:
-                    with open(p, 'rb') as f:
-                        st.download_button(f"⬇ {a['name']}", f.read(),
+                    data = read_file_safe(p)
+                    if data:
+                        st.download_button(f"⬇ {a['name']}", data,
                                            file_name=f"{a['name']}.mp4", mime="video/mp4",
                                            key=f"dl_{prefix}_{start}_{i}", use_container_width=True)
 
@@ -577,8 +734,9 @@ def render_results(analyses, folder, prefix):
                     u = a['uniqueness']
                     badge_class, _ = get_badge(u)
                     st.markdown(f'<div style="text-align:center;margin-top:-6px"><span class="rg-name">{a["name"]}</span> &nbsp; <span class="{badge_class}" style="font-size:.72rem;padding:2px 8px">{u:.0f}%</span></div>', unsafe_allow_html=True)
-                    with open(p, 'rb') as f:
-                        st.download_button(f"⬇ {a['name']}", f.read(),
+                    data = read_file_safe(p)
+                    if data:
+                        st.download_button(f"⬇ {a['name']}", data,
                                            file_name=f"{a['name']}.mp4", mime="video/mp4",
                                            key=f"dlprev_{prefix}_{start}_{i}", use_container_width=True)
 
@@ -809,7 +967,7 @@ def main():
                                 prog.progress(step / total_steps)
                                 op = os.path.join(vfolder, f"V{j+1:02d}.mp4")
                                 r = _generate_with_diversity(tmp.name, op, intensity, enabled_mods, previous_mods)
-                                if r["success"]:
+                                if r.get("success"):
                                     mods = r.get("modifications",{})
                                     previous_mods.append(mods)
                                     a = estimate_uniqueness(mods)
@@ -820,8 +978,18 @@ def main():
                                     })
                                     vr['success_count'] += 1
 
+                            # Post-check pairwise diversity across all variations of this video
+                            if len(vr['variations']) > 1:
+                                stat.text(f"🔄 [{vi+1}/{len(files)}] {vname} — diversification...")
+                                try:
+                                    _post_diversify_variations(tmp.name, vr['variations'], intensity, enabled_mods)
+                                except Exception:
+                                    pass
+                                vr['success_count'] = len(vr['variations'])
+
                             all_res.append(vr)
-                            os.unlink(tmp.name)
+                            try: os.unlink(tmp.name)
+                            except OSError: pass
 
                         st.session_state['bulk_results'] = all_res
                         st.session_state['bulk_folder'] = bf
@@ -879,8 +1047,9 @@ def main():
                             p = v.get('output_path','')
                             if p and os.path.exists(p):
                                 with dl_cols[i % 5]:
-                                    with open(p, 'rb') as f:
-                                        st.download_button(f"⬇ {v['name']}", f.read(),
+                                    data = read_file_safe(p)
+                                    if data:
+                                        st.download_button(f"⬇ {v['name']}", data,
                                             file_name=f"{r['name']}_{v['name']}.mp4",
                                             mime="video/mp4", key=f"dlb_{r['name']}_{v['name']}",
                                             use_container_width=True)
@@ -969,7 +1138,7 @@ def main():
                         st.error(f"FFmpeg non disponible ({ffpath}): {info}")
                         st.info("Installe `imageio-ffmpeg` (pip) ou `ffmpeg` (systeme).")
                         st.session_state['farm_running'] = False
-                        st.rerun()
+                        st.stop()
 
                     farm_folder = get_dated_folder_name() + " FERME"
                     farm_path = os.path.join(output_dir, farm_folder)
@@ -977,63 +1146,86 @@ def main():
 
                     farm_results = []
 
-                    for vi, (vname_full, vpath) in enumerate(temp_paths):
-                        video_name = Path(vname_full).stem
-                        video_folder = os.path.join(farm_path, video_name)
-                        os.makedirs(video_folder, exist_ok=True)
+                    try:
+                        for vi, (vname_full, vpath) in enumerate(temp_paths):
+                            video_name = Path(vname_full).stem
+                            video_folder = os.path.join(farm_path, video_name)
+                            os.makedirs(video_folder, exist_ok=True)
 
-                        video_result = {
-                            'name': video_name,
-                            'variations': [],
-                            'success_count': 0
-                        }
-                        previous_mods = []
+                            video_result = {
+                                'name': video_name,
+                                'variations': [],
+                                'success_count': 0
+                            }
+                            previous_mods = []
 
-                        for j in range(farm_vpv):
-                            status_text.markdown(f"""<div style="background:#1C1C1E;border:1px solid #2C2C2E;
-                                border-radius:8px;padding:8px 12px;font-size:0.85rem;color:#F5F5F7">
-                                ⏳ <b>[{vi+1}/{total_videos}]</b> {video_name} — V{j+1:02d}/{farm_vpv}
-                            </div>""", unsafe_allow_html=True)
+                            for j in range(farm_vpv):
+                                status_text.markdown(f"""<div style="background:#1C1C1E;border:1px solid #2C2C2E;
+                                    border-radius:8px;padding:8px 12px;font-size:0.85rem;color:#F5F5F7">
+                                    ⏳ <b>[{vi+1}/{total_videos}]</b> {video_name} — V{j+1:02d}/{farm_vpv}
+                                </div>""", unsafe_allow_html=True)
 
-                            out = os.path.join(video_folder, f"V{j+1:02d}.mp4")
-                            r = _generate_with_diversity(vpath, out, intensity, enabled_mods, previous_mods)
+                                out = os.path.join(video_folder, f"V{j+1:02d}.mp4")
+                                r = _generate_with_diversity(vpath, out, intensity, enabled_mods, previous_mods)
 
-                            if r["success"]:
-                                mods = r.get("modifications", {})
-                                previous_mods.append(mods)
-                                a = estimate_uniqueness(mods)
-                                video_result['variations'].append({
-                                    'name': f"V{j+1:02d}",
-                                    'output_path': out,
-                                    'uniqueness': a['uniqueness'],
-                                    'modifications': mods,
-                                    'thumbnail': extract_thumbnail(out)
-                                })
-                                video_result['success_count'] += 1
-                                all_scores.append(a['uniqueness'])
+                                if r.get("success"):
+                                    mods = r.get("modifications", {})
+                                    previous_mods.append(mods)
+                                    a = estimate_uniqueness(mods)
+                                    video_result['variations'].append({
+                                        'name': f"V{j+1:02d}",
+                                        'output_path': out,
+                                        'uniqueness': a['uniqueness'],
+                                        'modifications': mods,
+                                        'thumbnail': extract_thumbnail(out)
+                                    })
+                                    video_result['success_count'] += 1
+                                    all_scores.append(a['uniqueness'])
 
-                            completed += 1
-                            progress_bar.progress(completed / total_variations)
+                                completed += 1
+                                progress_bar.progress(completed / total_variations)
 
-                            # Update metrics
-                            elapsed = (datetime.now() - start_time).total_seconds()
-                            rate = completed / max(elapsed, 1)
-                            remaining = (total_variations - completed) / max(rate, 0.01)
-                            avg_score = sum(all_scores) / len(all_scores) if all_scores else 0
-                            safe_count = sum(1 for s in all_scores if s >= 60)
+                                # Update metrics
+                                elapsed = (datetime.now() - start_time).total_seconds()
+                                rate = completed / max(elapsed, 1)
+                                remaining = (total_variations - completed) / max(rate, 0.01)
+                                avg_score = sum(all_scores) / len(all_scores) if all_scores else 0
+                                safe_count = sum(1 for s in all_scores if s >= 60)
 
-                            with metrics_container.container():
-                                mc1, mc2, mc3, mc4 = st.columns(4)
-                                mc1.metric("✅ Termine", f"{completed}/{total_variations}")
-                                mc2.metric("📊 Score moyen", f"{avg_score:.0f}%")
-                                mc3.metric("⏱️ Restant", f"~{int(remaining//60)}m{int(remaining%60):02d}s")
-                                mc4.metric("🟢 Safe Instagram", f"{safe_count}/{len(all_scores)}")
+                                with metrics_container.container():
+                                    mc1, mc2, mc3, mc4 = st.columns(4)
+                                    mc1.metric("✅ Termine", f"{completed}/{total_variations}")
+                                    mc2.metric("📊 Score moyen", f"{avg_score:.0f}%")
+                                    mc3.metric("⏱️ Restant", f"~{int(remaining//60)}m{int(remaining%60):02d}s")
+                                    mc4.metric("🟢 Safe Instagram", f"{safe_count}/{len(all_scores)}")
 
-                        farm_results.append(video_result)
+                            # Post-check pairwise diversity across all variations of this video
+                            if len(video_result['variations']) > 1:
+                                status_text.markdown(f"""<div style="background:#1C1C1E;border:1px solid #2C2C2E;
+                                    border-radius:8px;padding:8px 12px;font-size:0.85rem;color:#F5F5F7">
+                                    🔄 <b>[{vi+1}/{total_videos}]</b> {video_name} — diversification...
+                                </div>""", unsafe_allow_html=True)
+                                try:
+                                    _post_diversify_variations(vpath, video_result['variations'], intensity, enabled_mods)
+                                except Exception:
+                                    pass
+                                video_result['success_count'] = len(video_result['variations'])
 
-                        # Cleanup temp
-                        try: os.unlink(vpath)
-                        except Exception: pass
+                            farm_results.append(video_result)
+
+                            # Cleanup temp
+                            try: os.unlink(vpath)
+                            except OSError: pass
+
+                    except Exception as e:
+                        status_text.empty()
+                        progress_bar.empty()
+                        st.error(f"Erreur pendant le traitement: {e}")
+                    finally:
+                        # Always clean up remaining temp files
+                        for _, vpath in temp_paths:
+                            try: os.unlink(vpath)
+                            except OSError: pass
 
                     st.session_state['farm_results'] = farm_results
                     st.session_state['farm_folder'] = farm_folder
@@ -1095,8 +1287,9 @@ def main():
                                 p = v.get('output_path','')
                                 if p and os.path.exists(p):
                                     with dl_cols[i % 5]:
-                                        with open(p, 'rb') as f:
-                                            st.download_button(f"⬇ {v['name']}", f.read(),
+                                        data = read_file_safe(p)
+                                        if data:
+                                            st.download_button(f"⬇ {v['name']}", data,
                                                 file_name=f"{r['name']}_{v['name']}.mp4",
                                                 mime="video/mp4", key=f"dlf_{r['name']}_{v['name']}",
                                                 use_container_width=True)
@@ -1303,4 +1496,14 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        st.error(f"Erreur inattendue: {e}")
+        st.code(str(e), language="text")
+        st.info("Recharge la page pour relancer l'application.")
+        # Clean up session state to allow recovery
+        for k in list(st.session_state.keys()):
+            if k.startswith(('farm_', 'bulk_', 'single_')):
+                del st.session_state[k]
+        gc.collect()

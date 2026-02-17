@@ -91,7 +91,7 @@ class UniquenessChecker:
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             return json.loads(result.stdout)
-        except:
+        except Exception:
             return {}
     
     def _evaluate_tiktok(self, video_path, video_hash, info):
@@ -107,7 +107,7 @@ class UniquenessChecker:
                 score -= 10
                 issues.append("Vidéo trop longue (>3min)")
                 recommendations.append("Découper en clips <3min")
-        except:
+        except Exception:
             pass
         
         # Check for duplicates in library
@@ -152,7 +152,7 @@ class UniquenessChecker:
                 score -= 10
                 issues.append("Vidéo longue pour Reels (>90s)")
                 recommendations.append("Idéal: 15-60 secondes")
-        except:
+        except Exception:
             pass
         
         # Check duplicates
@@ -182,7 +182,7 @@ class UniquenessChecker:
                 score -= 5
                 issues.append("Dépasse 60s (limite Shorts)")
                 recommendations.append("Couper à <60s pour Shorts")
-        except:
+        except Exception:
             pass
         
         # Check for audio (Content ID risk)
@@ -227,7 +227,7 @@ class UniquenessChecker:
                     max_similarity = 100
             
             return max_similarity
-        except:
+        except Exception:
             return 0
     
     def _get_risk_level(self, score):
@@ -290,7 +290,7 @@ class UniquenessChecker:
             
             with open(self.hashes_file, 'w') as f:
                 json.dump(library, f, indent=2)
-        except:
+        except Exception:
             pass
     
     def compare_videos(self, video1_path, video2_path):
